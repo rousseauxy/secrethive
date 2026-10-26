@@ -1,0 +1,421 @@
+@page "/vaults/{Vault}"
+@layout VaultLayout
+@inject Vaults Vaults
+@inject NavigationManager Navigation
+
+<PageTitle>@Vault · SecretHive</PageTitle>
+
+<VaultHeader Vault="@Vault" Role="role" CanManage="canManage" Active="secrets">
+    @if (canSet)
+    {
+        <button class="sh-btn sh-btn-primary" @onclick="OpenSecret"><Icon Name="plus" /> New secret</button>
+        <button class="sh-btn" @onclick="OpenCertificate"><Icon Name="certificate" /> New certificate</button>
+    }
+</VaultHeader>
+
+<Problem Message="@problem" />
+@if (done is not null)
+{
+    <div class="sh-done" role="status">@done</div>
+}
+
+<SecretActions @ref="actions" Vault="@Vault" OnDone="Done" />
+
+@* The list, and beside it the secret chosen in the address (?secret=name). On a phone the panel takes the place of
+   the list until it is closed. *@
+<div class="sh-split @(Shown is not null ? "has-panel" : "")">
+<div class="sh-split-list">
+<div class="sh-card">
+    @if (secrets.Count == 0)
+    {
+        <div class="sh-empty">@(problem is null ? "This vault is empty." : "Nothing to show.")</div>
+    }
+    else
+    {
+        <table class="sh-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    @if (hasUsername)
+                    {
+                        <th>Username</th>
+                    }
+                    <th>Kind</th><th class="sh-col-extra">Version</th><th class="sh-col-fields">Fields</th><th class="sh-col-extra">Changed</th><th><span class="sh-sr">Actions</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var secret in secrets)
+                {
+                    var selected = string.Equals(secret.Name, Shown?.Name, StringComparison.Ordinal);
+                    <tr class="@(selected ? "sh-selected" : "")" aria-selected="@(selected ? "true" : null)">
+                        <td>
+                            <a class="sh-mono" href="@SelectHref(secret.Name)" data-select>@secret.Name</a>
+                            @if (!string.IsNullOrEmpty(secret.Description))
+                            {
+                                <span class="sh-info" tabindex="0" role="note" title="@secret.Description"><Icon Name="info" /><span class="sh-sr">@secret.Description</span></span>
+                            }
+                            @if (secret.IsLinked)
+                            {
+                                <span class="sh-badge sh-badge-accent" title="@string.Join(", ", secret.LinkedWith ?? [])">linked · @((secret.LinkedWith?.Count ?? 0) + secret.LinkedElsewhere)</span>
+                            }
+                        </td>
+                        @if (hasUsername)
+                        {
+                            <td class="sh-small">
+                                @if (secret.Fields.TryGetValue("username", out var username))
+                                {
+                                    <span>@username</span>
+                                    <CopyButton Title="Copy the username" Text="@(() => Task.FromResult<string?>(username))" />
+                                }
+                                else if (secret.SensitiveFields.Contains("username"))
+                                {
+                                    <span class="sh-faint">hidden</span>
+                                    @if (CanRead)
+                                    {
+                                        <CopyButton Title="Copy the username (recorded)" Text="@(() => ReadText(secret.Name, "field:username"))" />
+                                    }
+                                }
+                            </td>
+                        }
+                        <td>
+                            @if (secret.Certificate is { } certificate)
+                            {
+                                <span class="@ExpiryBadge(certificate.NotAfterUtc)">certificate · @certificate.NotAfterUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+                            }
+                            else
+                            {
+                                <span class="sh-badge">secret</span>
+                            }
+                        </td>
+                        <td class="sh-mono sh-col-extra">@secret.Version</td>
+                        <td class="sh-small sh-col-fields">
+                            @* The username has a column of its own. *@
+                            @foreach (var field in secret.Fields.Where(field => field.Key != "username"))
+                            {
+                                <div><span class="sh-muted sh-mono">@field.Key</span> @field.Value</div>
+                            }
+                            @foreach (var field in secret.SensitiveFields.Where(field => field != "username"))
+                            {
+                                <div><span class="sh-muted sh-mono">@field</span> <span class="sh-faint">hidden</span></div>
+                            }
+                        </td>
+                        <td class="sh-muted sh-nowrap sh-col-extra">@secret.VersionCreatedUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>
+                        <td class="sh-actions">
+                            @* The few things done most, without opening the secret. Copying the value is a read like a reveal, and
+                               on record; the rest open the same dialogs as on the secret's own page. *@
+                            @if (CanRead && secret.Kind == ValueKind.Secret)
+                            {
+                                <CopyButton Title="Copy the value (recorded)" Text="@(() => ReadText(secret.Name, SecretService.ValueSlot))" />
+                            }
+                            @if (canSet)
+                            {
+                                <button class="sh-btn sh-btn-icon sh-btn-sm" title="@(secret.Kind == ValueKind.Certificate ? "Renew" : "New version")" @onclick="() => Open(SecretAction.NewVersion, secret)">
+                                    <Icon Name="@(secret.Kind == ValueKind.Certificate ? "certificate" : "refresh")" /><span class="sh-sr">@(secret.Kind == ValueKind.Certificate ? "Renew" : "New version")</span>
+                                </button>
+                            }
+                            @if (CanChange)
+                            {
+                                @* A <details>, as the menu in the top bar: app.js closes it on a click anywhere else, on one of
+                                   its own buttons and on Escape, in the browser, without asking the server. *@
+                                <details class="sh-rowmenu" data-menu>
+                                    <summary class="sh-btn sh-btn-icon sh-btn-sm" title="More"><Icon Name="more" /><span class="sh-sr">More actions for @secret.Name</span></summary>
+                                    <div class="sh-rowmenu-panel" role="menu">
+                                        <button type="button" role="menuitem" @onclick="() => Open(SecretAction.Rename, secret)">Rename…</button>
+                                        <button type="button" role="menuitem" @onclick="() => Open(SecretAction.Elsewhere, secret)">Link, copy or move…</button>
+                                        @if (secret.LinkedWith is { Count: > 0 })
+                                        {
+                                            <button type="button" role="menuitem" @onclick="() => Open(SecretAction.Unlink, secret)">Unlink…</button>
+                                        }
+                                        <button type="button" role="menuitem" class="sh-rowmenu-danger" @onclick="() => Open(SecretAction.Delete, secret)"><Icon Name="trash" /> Delete…</button>
+                                    </div>
+                                </details>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (role >= VaultRole.SecretsOfficer || Vaults.IsAdmin)
+{
+    @* Closed until asked for: the trail is long, and most visits are for the secrets. Read when it is opened. *@
+    <details class="sh-card sh-fold" @ontoggle="ToggleActivity">
+        <summary class="sh-card-header">
+            <h2>Activity</h2>
+            <span class="sh-muted sh-small">What happened in this vault, newest first.</span>
+        </summary>
+        @if (activityOpen)
+        {
+            <AuditTable Rows="activity" ShowVault="false" />
+            <div class="sh-pager">
+                <button class="sh-btn sh-btn-sm" disabled="@(activityPage == 0)" @onclick="() => ShowActivity(activityPage - 1)"><Icon Name="left" /> Newer</button>
+                <span class="sh-muted sh-small">Page @(activityPage + 1)</span>
+                <button class="sh-btn sh-btn-sm" disabled="@(!activityMore)" @onclick="() => ShowActivity(activityPage + 1)">Older <Icon Name="right" /></button>
+                <button class="sh-btn sh-btn-sm sh-pager-end" title="Read the trail again" @onclick="() => ShowActivity(0)"><Icon Name="refresh" /> Refresh</button>
+            </div>
+        }
+    </details>
+}
+</div>
+
+@if (Shown is { } shown)
+{
+    <SecretPanel @key="shown.Name" Vault="@Vault" Secret="shown" CanRead="CanRead" CanSet="canSet" CanChange="CanChange"
+                 ShowActivity="@(CanChange || Vaults.IsAdmin)" OnAction="action => Open(action, shown)" />
+}
+</div>
+
+<Dialog Title="New secret" Open="secretOpen" OnClose="CloseDialogs" Wide="true">
+    <Problem Message="@dialogProblem" />
+    <form class="sh-form" @onsubmit="CreateSecret">
+        <div class="sh-field">
+            <label class="sh-label">Name</label>
+            <input class="sh-input sh-mono" @bind="name" placeholder="sql-app-connection" />
+            <span class="sh-hint">For what it is, not for who reads it. Letters, digits and hyphens.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Value</label>
+            <textarea class="sh-textarea" @bind="value" autocomplete="off" spellcheck="false"></textarea>
+            <PasswordGenerator OnGenerated="made => value = made" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Description</label>
+            <input class="sh-input" @bind="description" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Fields</label>
+            <FieldEditor Rows="fields" Standard="true" />
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Create secret</button>
+            <button class="sh-btn" type="button" @onclick="CloseDialogs">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+<Dialog Title="New certificate" Open="certificateOpen" OnClose="CloseDialogs" Wide="true">
+    <Problem Message="@dialogProblem" />
+    <form class="sh-form" @onsubmit="ImportCertificate">
+        <div class="sh-field">
+            <label class="sh-label">Name</label>
+            <input class="sh-input sh-mono" @bind="certificateName" placeholder="wildcard-example-test" />
+        </div>
+        <CertificateUpload @ref="upload" />
+        <div class="sh-field">
+            <label class="sh-label">Description</label>
+            <input class="sh-input" @bind="certificateDescription" />
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Store certificate</button>
+            <button class="sh-btn" type="button" @onclick="CloseDialogs">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+@code {
+    private const int ActivityPageSize = 20;
+
+    private IReadOnlyList<SecretSummary> secrets = [];
+    private IReadOnlyList<AuditEvent> activity = [];
+    private VaultRole? role;
+    private bool canManage;
+    private bool canSet;
+    private string? problem;
+    private string? done;
+    private SecretActions actions = default!;
+
+    private bool CanChange => role >= VaultRole.SecretsOfficer;
+    private bool CanRead => role >= VaultRole.SecretsUser;
+
+    private bool activityOpen;
+    private int activityPage;
+    private bool activityMore;
+    private readonly List<long?> activityCursors = [null];
+
+    private bool secretOpen;
+    private bool certificateOpen;
+    private string? dialogProblem;
+
+    private string name = "";
+    private string value = "";
+    private string? description;
+    private List<FieldRow> fields = [];
+
+    private string certificateName = "";
+    private string? certificateDescription;
+    private CertificateUpload upload = default!;
+
+    [Parameter]
+    public string Vault { get; set; } = "";
+
+    /// <summary>The secret shown beside the list, by name.</summary>
+    [SupplyParameterFromQuery(Name = "secret")]
+    public string? Selected { get; set; }
+
+    private string? loadedFor;
+    private bool hasUsername;
+    private string? actingOn;
+
+    private SecretSummary? Shown => Selected is null ? null : secrets.FirstOrDefault(secret => string.Equals(secret.Name, Selected, StringComparison.OrdinalIgnoreCase));
+
+    private string SelectHref(string name) => $"/vaults/{Vault}?secret={Uri.EscapeDataString(name)}";
+
+    // Choosing another secret changes only the address: the list is read again only for another vault.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.Equals(loadedFor, Vault, StringComparison.OrdinalIgnoreCase))
+        {
+            (done, activityOpen) = (null, false);
+            await Load();
+            loadedFor = Vault;
+        }
+    }
+
+    private async Task Load()
+    {
+        // Nothing from an earlier look stays on the page when this one is refused.
+        secrets = [];
+        problem = null;
+        try
+        {
+            // The role and whether the caller manages the vault are known from anywhere, so the way to the access and
+            // network pages is still offered when the secrets themselves are refused from this address.
+            role = await Vaults.Run(service => service.RoleAsync(Vault, Vaults.Caller));
+            canManage = await Vaults.Run(service => service.CanManageAccessAsync(Vault, Vaults.Caller));
+            canSet = await Vaults.Run(service => service.CanSetAsync(Vault, Vaults.Caller));
+            secrets = await Vaults.Run(service => service.ListAsync(Vault, Vaults.Caller));
+            hasUsername = secrets.Any(secret => secret.Fields.ContainsKey("username") || secret.SensitiveFields.Contains("username"));
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    // The fold says when it is opened or closed; it does not say which, so the page keeps count.
+    private async Task ToggleActivity()
+    {
+        activityOpen = !activityOpen;
+        if (activityOpen)
+        {
+            await ShowActivity(0);
+        }
+    }
+
+    // Each page starts below the last row of the one before (activityCursors), so the trail goes back all the way.
+    private async Task ShowActivity(int page)
+    {
+        try
+        {
+            if (page == 0)
+            {
+                activityCursors.RemoveRange(1, activityCursors.Count - 1);
+            }
+            else if (page > activityPage && activity.Count > 0)
+            {
+                activityCursors.Add(activity[^1].Id);
+            }
+            else if (page < activityPage)
+            {
+                activityCursors.RemoveAt(activityCursors.Count - 1);
+            }
+
+            // One more than fits, to know whether there is an older page.
+            var rows = await Vaults.Run(service => service.AuditAsync(ActivityPageSize + 1, Vaults.Caller, Vault, before: activityCursors[^1]));
+            activity = [.. rows.Take(ActivityPageSize)];
+            activityMore = rows.Count > ActivityPageSize;
+            activityPage = activityCursors.Count - 1;
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    private void OpenSecret()
+    {
+        (name, value, description, fields, dialogProblem) = ("", "", null, [], null);
+        secretOpen = true;
+    }
+
+    private void OpenCertificate()
+    {
+        (certificateName, certificateDescription, dialogProblem) = ("", null, null);
+        certificateOpen = true;
+    }
+
+    private void CloseDialogs()
+    {
+        // What was typed does not stay behind in the page: a value is not kept in a closed form.
+        (secretOpen, certificateOpen, value, dialogProblem) = (false, false, "", null);
+    }
+
+    private async Task CreateSecret()
+    {
+        dialogProblem = await Vaults.Try(service => service.SetAsync(
+            new SetSecret(Vault, name.Trim(), Encoding.UTF8.GetBytes(value), Description: description, Fields: FieldRow.Inputs(fields)),
+            Vaults.Caller));
+        if (dialogProblem is null)
+        {
+            Navigation.NavigateTo($"/vaults/{Vault}/secrets/{name.Trim()}");
+        }
+    }
+
+    private async Task ImportCertificate()
+    {
+        dialogProblem = await Vaults.Try(service => service.ImportCertificateAsync(
+            new ImportCertificate(Vault, certificateName.Trim(), upload.Parts(), certificateDescription),
+            Vaults.Caller));
+        if (dialogProblem is null)
+        {
+            Navigation.NavigateTo($"/vaults/{Vault}/secrets/{certificateName.Trim()}");
+        }
+    }
+
+    private Task Open(SecretAction action, SecretSummary secret)
+    {
+        (done, actingOn) = (null, secret.Name);
+        return actions.Open(action, secret);
+    }
+
+    // Whatever was done, the list is read again here: a moved or deleted secret leaves it, a renamed one is in it under
+    // its new name. Staying on the list is the point of doing it from here.
+    private async Task Done(SecretActionResult result)
+    {
+        await Load();
+        done = result.Message;
+
+        // The panel follows what was done to the secret it shows: a rename keeps it open under the new name, a move
+        // or a delete closes it.
+        if (Selected is not null && string.Equals(actingOn, Selected, StringComparison.OrdinalIgnoreCase) && result.Location is { } location)
+        {
+            var here = $"/vaults/{Vault}/secrets/";
+            Navigation.NavigateTo(location.StartsWith(here, StringComparison.OrdinalIgnoreCase) ? SelectHref(location[here.Length..]) : $"/vaults/{Vault}");
+        }
+    }
+
+    // A copy from the list is a read like any other; what went wrong is said at the top of the list.
+    private async Task<string?> ReadText(string secret, string slot)
+    {
+        try
+        {
+            using var read = await Vaults.Run(service => service.ReadAsync(Vault, secret, Vaults.Caller, slot));
+            return Encoding.UTF8.GetString(read.Reveal());
+        }
+        catch (DomainException e)
+        {
+            (problem, done) = (e.Message, null);
+            StateHasChanged();
+            return null;
+        }
+    }
+
+    private static string ExpiryBadge(DateTime notAfterUtc) => (notAfterUtc - DateTime.UtcNow).TotalDays switch
+    {
+        < 3 => "sh-badge sh-badge-danger",
+        < 30 => "sh-badge sh-badge-warn",
+        _ => "sh-badge sh-badge-ok",
+    };
+}

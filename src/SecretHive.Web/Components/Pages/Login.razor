@@ -1,0 +1,128 @@
+@page "/login"
+@layout PlainLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@using SecretHive.Application.Accounts
+@using SecretHive.Web.Security
+@inject AccountService Accounts
+@inject AuditWriter Audit
+@inject NavigationManager Navigation
+@inject SecretHive.Application.Ports.IOidcProviderStore Providers
+
+<PageTitle>Sign in · SecretHive</PageTitle>
+
+<div class="sh-signin">
+    <div class="sh-card">
+        <div class="sh-card-header"><h2>Sign in to SecretHive</h2></div>
+        <div class="sh-card-body">
+            <Problem Message="@problem" />
+            @* The provider first, where there is one: that is how people sign in. The local form stays one click
+               away, closed, for the accounts that have a password here, the first administrator above all. It is
+               open when there is no provider, and when it is what was just used. *@
+            @if (providers.Count > 0)
+            {
+                @foreach (var provider in providers)
+                {
+                    @* A POST with this page's token, so no other site can start a sign-in in this browser. *@
+                    <form method="post" action="/account/external/@provider.Slug" class="sh-provider">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                        <button class="sh-btn sh-btn-primary" type="submit">Sign in with @provider.DisplayName</button>
+                    </form>
+                }
+                <details class="sh-signin-local" open="@LocalOpen">
+                    <summary>Sign in with a local account</summary>
+                    @LocalForm
+                </details>
+            }
+            else
+            {
+                @LocalForm
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    // The form itself, once: under the provider buttons it sits in a fold, without them it is the page.
+    private RenderFragment LocalForm => @<form class="sh-form" method="post" @formname="signin" @onsubmit="SignIn">
+        <AntiforgeryToken />
+        <div class="sh-field">
+            <label class="sh-label" for="username">User name</label>
+            <input class="sh-input" id="username" name="UserName" value="@UserName" autocomplete="username" autofocus="@(providers.Count == 0)" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label" for="password">Password</label>
+            <input class="sh-input" id="password" name="Password" type="password" autocomplete="current-password" />
+        </div>
+        <div class="sh-form-actions"><button class="sh-btn @(providers.Count == 0 ? "sh-btn-primary" : "")" type="submit">Sign in</button></div>
+    </form>;
+
+    // Open when the local form is what was just sent, so its refusal is not hidden in a closed fold.
+    private bool LocalOpen => HttpContext.Request.Method == "POST" || !string.IsNullOrEmpty(UserName);
+
+    private string? problem;
+    private IReadOnlyList<OidcProvider> providers = [];
+
+    /// <summary>Why a sign-in through a provider ended back here.</summary>
+    [SupplyParameterFromQuery]
+    private string? External { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        providers = [.. (await Providers.ListAsync(HttpContext.RequestAborted)).Where(provider => provider.Enabled)];
+        problem ??= External switch
+        {
+            null or "" => null,
+            "exists" => "An account with that user name or email address already exists. Sign in to it with its password, then connect the provider from your profile.",
+            "no-account" => "No account is connected to that identity. Sign in with a password and connect the provider from your profile, or ask an administrator.",
+            "email-not-allowed" => "That identity's email address is not one this server makes accounts for.",
+            "disabled" => "This account is disabled.",
+            "expired" => "The sign-in page was open too long. Try again.",
+            "unknown" => "That provider is not available.",
+            _ => "Signing in through the provider did not work. Try again, or sign in with a password.",
+        };
+    }
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private string? UserName { get; set; }
+
+    [SupplyParameterFromForm]
+    private string? Password { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private async Task SignIn()
+    {
+        var address = HttpContext.Connection.RemoteIpAddress is { } remote ? (remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote).ToString() : null;
+        var caller = new Caller((UserName ?? "").Trim() is { Length: > 0 and <= 64 } name ? name : "unknown", address, "ui");
+        var result = await Accounts.SignInAsync(UserName ?? "", Password ?? "", HttpContext.RequestAborted);
+        switch (result.Status)
+        {
+            case SignInStatus.Success:
+                await Security.Accounts.SignInUserAsync(HttpContext, result.User!);
+                await Audit.RecordAsync("auth.signin", caller);
+                break;
+            case SignInStatus.LockedOut:
+                await Audit.RecordAsync("auth.lockout", caller, severity: AuditSeverity.Security);
+                problem = "Too many failed attempts. Try again in fifteen minutes.";
+                return;
+            case SignInStatus.Disabled:
+                await Audit.RecordAsync("auth.signin.disabled", caller, severity: AuditSeverity.Security);
+                problem = "This account is disabled.";
+                return;
+            default:
+                // The same answer for an unknown name and a wrong password: which names exist is not for an outsider to learn.
+                await Audit.RecordAsync("auth.signin.failed", caller, severity: AuditSeverity.Notice);
+                problem = "That user name and password do not match an account.";
+                return;
+        }
+
+        // Only ever back into this site: a return address comes from the query, so it is trusted no further than a path.
+        Navigation.NavigateTo(result.User!.MustChangePassword ? Security.Accounts.PasswordPath : ReturnUrls.LocalOr(ReturnUrl, "/"));
+    }
+}

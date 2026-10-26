@@ -1,0 +1,128 @@
+@page "/admin/backups"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.SuperAdminRole)]
+@using SecretHive.Infrastructure.Backup
+@inject Vaults Vaults
+@inject BackupOptions Options
+@inject BackupStatus Status
+@inject SecretHive.Web.Security.ServerInfo Server
+
+<PageTitle>Backups · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Backups</h1>
+        <p class="sh-lede">
+            Everything in the database as one file: vaults, secrets and their versions, accounts, roles, keys, the
+            audit trail. Values stay encrypted in it, and the master key is never in it.
+        </p>
+    </div>
+    <button class="sh-btn sh-btn-primary" disabled="@busy" @onclick="Create">@(busy ? "Working…" : "Back up now")</button>
+</div>
+
+<Problem Message="@problem" />
+@if (notice is not null)
+{
+    <div class="sh-done" role="status">@notice</div>
+}
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>State</h2></div>
+    <div class="sh-card-body">
+        <dl class="sh-facts">
+            <dt>Last verified backup</dt>
+            <dd>
+                @if (Status.LastVerifiedUtc is { } last)
+                {
+                    <span>@last.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) UTC</span>
+                    <span class="sh-muted"> · read back whole, seal intact</span>
+                }
+                else
+                {
+                    <span class="sh-badge sh-badge-danger">none</span>
+                }
+            </dd>
+            @if (Status.LastError is { } error)
+            {
+                <dt>Last failure</dt><dd>@error</dd>
+            }
+            <dt>Schedule</dt>
+            <dd>@(Options.Enabled ? $"When the newest is older than {Options.IntervalHours} hours; the newest {Options.Keep} are kept" : "Off: only made by hand")</dd>
+            <dt>Folder</dt><dd class="sh-mono">@Options.Directory</dd>
+            <dt>Sealed under master key</dt><dd class="sh-mono">@Server.MasterKeyId</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>Files</h2></div>
+    @if (files.Count == 0)
+    {
+        <div class="sh-empty">No backup has been made yet.</div>
+    }
+    else
+    {
+        <div class="sh-table-wrap">
+            <table class="sh-table">
+                <thead><tr><th>File</th><th>Made (UTC)</th><th>Size</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var file in files)
+                    {
+                        <tr>
+                            <td class="sh-mono">@file.Name</td>
+                            <td class="sh-nowrap">@file.CreatedUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sh-nowrap">@((file.Bytes / 1024.0).ToString("0.#", CultureInfo.InvariantCulture)) KiB</td>
+                            <td><a class="sh-btn sh-btn-sm" href="/api/v1/backups/@file.Name" download="@file.Name">Download</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>Restoring</h2></div>
+    <div class="sh-card-body">
+        <p style="margin-top: 0">
+            A restore fills an <b>empty</b> database and never merges into one that holds anything. It needs two
+            things: a backup, and the master key file it was made under. Start the server once with
+            <span class="sh-mono">restore /path/to/backup.shbak</span> as its command; it checks the seal, puts
+            everything back in one step and stops. Then start it normally.
+        </p>
+        <p class="sh-muted" style="margin-bottom: 0">
+            A backup is worthless without the master key, and the master key is worthless without a backup. Keep a
+            copy of each somewhere this host's failure cannot reach, and never in the same place.
+        </p>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<BackupFile> files = [];
+    private string? problem;
+    private string? notice;
+    private bool busy;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load() => files = await Vaults.With<BackupService, IReadOnlyList<BackupFile>>(service => Task.FromResult(service.List(Vaults.Caller)));
+
+    private async Task Create()
+    {
+        busy = true;
+        problem = null;
+        notice = null;
+        try
+        {
+            var made = await Vaults.With<BackupService, BackupFile>(service => service.CreateAsync(Vaults.Caller));
+            notice = $"{made.Name} written and read back whole.";
+        }
+        catch (Exception e) when (e is DomainException or IOException or UnauthorizedAccessException)
+        {
+            problem = "The backup failed: " + e.Message;
+        }
+
+        busy = false;
+        await Load();
+    }
+}

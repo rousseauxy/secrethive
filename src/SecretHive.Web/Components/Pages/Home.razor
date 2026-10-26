@@ -1,0 +1,376 @@
+@page "/"
+@layout VaultLayout
+@using SecretHive.Application.Accounts
+@using SecretHive.Application.Ports
+@using SecretHive.Infrastructure.Backup
+@inject Vaults Vaults
+@inject BackupStatus Backups
+@inject BackupOptions BackupSettings
+@inject TimeProvider Clock
+
+<PageTitle>Vaults · SecretHive</PageTitle>
+
+@*
+    Where a visit starts: the search across every vault, what needs attention, what was pinned, what changed lately
+    and every vault by folder. A section with nothing in it is not shown, except the vaults.
+*@
+<div class="sh-page-head">
+    <div>
+        <h1>Vaults</h1>
+        <p class="sh-lede">A vault is a set of secrets with one set of readers.</p>
+    </div>
+    @if (Vaults.IsAdmin)
+    {
+        <div class="sh-right">
+            <a class="sh-btn" href="/admin/folders">Manage folders</a>
+            <button class="sh-btn sh-btn-primary" @onclick="Open"><Icon Name="plus" /> New vault</button>
+        </div>
+    }
+</div>
+
+<Problem Message="@problem" />
+
+@if (view.Vaults.Count > 0)
+{
+    <div class="sh-search">
+        <input class="sh-input" type="search" placeholder="Search secrets in every vault: a name, a description, a field…" autocomplete="off" spellcheck="false"
+               aria-label="Search secrets in every vault" @bind="query" @bind:event="oninput" @bind:after="Search" />
+    </div>
+}
+
+@if (searched)
+{
+    <div class="sh-card">
+        @if (found.Count == 0)
+        {
+            <div class="sh-empty">Nothing in your vaults matches "@query". A search looks at names, descriptions and ordinary fields, never at values.</div>
+        }
+        else
+        {
+            <table class="sh-table">
+                <thead><tr><th>Secret</th><th>Vault</th><th>Kind</th><th>Fields</th><th>Changed</th></tr></thead>
+                <tbody>
+                    @foreach (var secret in found)
+                    {
+                        <tr>
+                            <td>
+                                <a class="sh-mono" href="@SecretHref(secret.Vault, secret.Name)">@secret.Name</a>
+                                @if (!string.IsNullOrEmpty(secret.Description))
+                                {
+                                    <span class="sh-info" tabindex="0" role="note" title="@secret.Description"><Icon Name="info" /><span class="sh-sr">@secret.Description</span></span>
+                                }
+                                @if (secret.IsLinked)
+                                {
+                                    <span class="sh-badge sh-badge-accent" title="@string.Join(", ", secret.LinkedWith ?? [])">linked</span>
+                                }
+                            </td>
+                            <td><a class="sh-mono" href="@($"/vaults/{secret.Vault}")">@secret.Vault</a></td>
+                            <td><span class="sh-badge">@(secret.Kind == ValueKind.Certificate ? "certificate" : "secret")</span></td>
+                            <td class="sh-small">
+                                @foreach (var field in secret.Fields)
+                                {
+                                    <div><span class="sh-muted sh-mono">@field.Key</span> @field.Value</div>
+                                }
+                            </td>
+                            <td class="sh-muted sh-nowrap">@secret.VersionCreatedUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (found.Count == SearchLimit)
+            {
+                <div class="sh-card-body sh-muted sh-small">The first @SearchLimit are shown. Type more to narrow it down.</div>
+            }
+        }
+    </div>
+}
+else
+{
+    @if (attention.Count > 0)
+    {
+        <section class="sh-card sh-home-attention" aria-labelledby="attention-title">
+            <div class="sh-card-header"><h2 id="attention-title">Needs attention</h2></div>
+            <ul class="sh-home-list">
+                @foreach (var item in attention)
+                {
+                    <li class="@($"sh-home-{item.Level}")">
+                        <span class="sh-home-dot" aria-hidden="true"></span>
+                        <a href="@item.Href">@item.Text</a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (view.Vaults.Any(vault => vault.Pinned) || view.PinnedSecrets.Count > 0)
+    {
+        <section class="sh-card" aria-labelledby="pinned-title">
+            <div class="sh-card-header"><h2 id="pinned-title">Pinned</h2></div>
+            <ul class="sh-home-list">
+                @foreach (var vault in view.Vaults.Where(vault => vault.Pinned))
+                {
+                    <li>
+                        <PinButton Vault="@vault.Name" Pinned="true" OnChanged="_ => Load()" />
+                        <a class="sh-mono" href="@($"/vaults/{vault.Name}")">@vault.Name</a>
+                        <span class="sh-muted sh-small">vault</span>
+                    </li>
+                }
+                @foreach (var secret in view.PinnedSecrets)
+                {
+                    <li>
+                        <PinButton Vault="@secret.Vault" Secret="@secret.Name" Pinned="true" OnChanged="_ => Load()" />
+                        <a class="sh-mono" href="@SecretHref(secret.Vault, secret.Name)">@secret.Name</a>
+                        <span class="sh-muted sh-small">in <span class="sh-mono">@secret.Vault</span></span>
+                        @if (!string.IsNullOrEmpty(secret.Description))
+                        {
+                            <span class="sh-info" tabindex="0" role="note" title="@secret.Description"><Icon Name="info" /><span class="sh-sr">@secret.Description</span></span>
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (view.Changed.Count > 0)
+    {
+        <section class="sh-card" aria-labelledby="changed-title">
+            <div class="sh-card-header">
+                <h2 id="changed-title">Recently changed</h2>
+                <span class="sh-muted sh-small">A new version in the last @SecretService.ChangedDays days, newest first.</span>
+            </div>
+            <table class="sh-table">
+                <thead><tr><th>Secret</th><th>Vault</th><th>Version</th><th>When (UTC)</th><th>By</th></tr></thead>
+                <tbody>
+                    @foreach (var change in view.Changed)
+                    {
+                        <tr>
+                            <td><a class="sh-mono" href="@SecretHref(change.Vault, change.Secret)">@change.Secret</a></td>
+                            <td><a class="sh-mono" href="@($"/vaults/{change.Vault}")">@change.Vault</a></td>
+                            <td class="sh-mono">@change.Version</td>
+                            <td class="sh-muted sh-nowrap">@change.AtUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td class="sh-small">@change.By</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+
+    @if (view.Vaults.Count == 0)
+    {
+        <div class="sh-card">
+            <div class="sh-empty">@(Vaults.IsAdmin ? "No vaults yet. Create the first one with New vault." : "You have no role in any vault yet. An administrator, or the admin of a vault, can give you one.")</div>
+        </div>
+    }
+    else
+    {
+        <div class="sh-home-folders">
+            @* Folders first and the top level last, as in the tree beside the page. *@
+            @foreach (var group in view.Vaults.GroupBy(vault => string.Join(" / ", vault.Folders)).OrderBy(group => group.Key.Length == 0).ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                <section class="sh-card sh-home-folder">
+                    <div class="sh-card-header">
+                        <h2 class="@(group.Key.Length > 0 ? "sh-mono" : "")">@(group.Key.Length > 0 ? group.Key : "Top level")</h2>
+                        <span class="sh-muted sh-small">@group.Count() vault(s)</span>
+                    </div>
+                    <ul class="sh-home-list">
+                        @foreach (var vault in group)
+                        {
+                            <li>
+                                <PinButton Vault="@vault.Name" Pinned="vault.Pinned" OnChanged="_ => Load()" />
+                                <a class="sh-mono sh-home-name" href="@($"/vaults/{vault.Name}")">@vault.Name</a>
+                                @if (!string.IsNullOrEmpty(vault.Description))
+                                {
+                                    <span class="sh-info" tabindex="0" role="note" title="@vault.Description"><Icon Name="info" /><span class="sh-sr">@vault.Description</span></span>
+                                }
+                                <span class="sh-home-meta">
+                                    <span class="sh-muted sh-small sh-home-count" title="@(vault.Secrets is null ? "Not from this address: the vault's networks" : "Secrets in it")">@(vault.Secrets is { } count ? (count == 1 ? "1 secret" : $"{count} secrets") : "—")</span>
+                                    <span class="sh-badge" title="Your role in this vault">@SecretService.RoleName(vault.Role)</span>
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+        </div>
+    }
+}
+
+<Dialog Title="New vault" Open="open" OnClose="Close">
+    <Problem Message="@dialogProblem" />
+    <form class="sh-form" @onsubmit="Create">
+        <div class="sh-field">
+            <label class="sh-label">Name</label>
+            <input class="sh-input sh-mono" @bind="name" placeholder="shop-prod" />
+            <span class="sh-hint">Letters, digits and hyphens. Name it for what it serves, and give each environment its own.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Description</label>
+            <input class="sh-input" @bind="description" />
+        </div>
+        @if (folders.Count > 0)
+        {
+            <div class="sh-field">
+                <label class="sh-label" for="vault-folder">Folder</label>
+                <select id="vault-folder" class="sh-select" @bind="folder">
+                    <option value="">(top, no folder)</option>
+                    @foreach (var option in folders)
+                    {
+                        <option value="@option.Name">@FolderOptions.Label(option)</option>
+                    }
+                </select>
+                <span class="sh-hint">Every role given on that folder, or on one above it, counts in the new vault from the start.</span>
+            </div>
+        }
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Create vault</button>
+            <button class="sh-btn" type="button" @onclick="Close">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+@code {
+    private const int SearchLimit = 50;
+    private const int KeyDays = 14;
+
+    /// <summary>One line of "needs attention": what, where to deal with it, and how urgent (danger, warn).</summary>
+    private sealed record Attention(string Text, string Href, string Level);
+
+    private HomeView view = new([], [], [], [], null);
+    private List<Attention> attention = [];
+    private IReadOnlyList<SecretSummary> found = [];
+    private IReadOnlyList<FolderSummary> folders = [];
+    private string query = "";
+    private bool searched;
+    private int asked;
+    private string? problem;
+
+    private string name = "";
+    private string? description;
+    private string folder = "";
+    private string? dialogProblem;
+    private bool open;
+
+    private static string SecretHref(string vault, string secret) => $"/vaults/{vault}?secret={Uri.EscapeDataString(secret)}";
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            view = await Vaults.Run(service => service.HomeAsync(Vaults.Caller));
+            folders = Vaults.IsAdmin ? await Vaults.Run(service => service.ListFoldersAsync(Vaults.Caller)) : [];
+            attention = await AttentionAsync();
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    // What is about to stop working, soonest first, each with the page where it is dealt with.
+    private async Task<List<Attention>> AttentionAsync()
+    {
+        var now = Clock.GetUtcNow().UtcDateTime;
+        var items = new List<Attention>();
+        foreach (var certificate in view.Ending)
+        {
+            var date = certificate.NotAfterUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            items.Add(certificate.NotAfterUtc <= now
+                ? new($"Certificate {certificate.Secret} in {certificate.Vault} ended on {date}", SecretHref(certificate.Vault, certificate.Secret), "danger")
+                : new($"Certificate {certificate.Secret} in {certificate.Vault} ends on {date}", SecretHref(certificate.Vault, certificate.Secret), (certificate.NotAfterUtc - now).TotalDays < 14 ? "danger" : "warn"));
+        }
+
+        if (Vaults.Caller.UserKey is { } me)
+        {
+            foreach (var key in await EndingKeysAsync(me, now))
+            {
+                items.Add(new($"Your key \"{key.Label}\" ({KeyService.Marker}{key.Prefix}) ends on {key.ExpiresUtc!.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", "/account/profile", "warn"));
+            }
+        }
+
+        if (Vaults.IsAdmin)
+        {
+            var services = (await Vaults.With<IUserStore, IReadOnlyList<SecretHive.Domain.Entities.User>>(store => store.ListAsync(default))).Where(user => user.IsService && !user.IsDisabled);
+            foreach (var service in services)
+            {
+                foreach (var key in await EndingKeysAsync(service.Key, now))
+                {
+                    items.Add(new($"Key \"{key.Label}\" ({KeyService.Marker}{key.Prefix}) of {service.UserName} ends on {key.ExpiresUtc!.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", "/admin/tokens", "warn"));
+                }
+            }
+
+            if (BackupSettings.Enabled && (Backups.LastVerifiedUtc is not { } verified || (now - verified).TotalHours > BackupSettings.IntervalHours * 1.5))
+            {
+                items.Add(new(Backups.LastVerifiedUtc is { } at
+                    ? $"The last backup that was read back whole is from {at.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC"
+                    : "No backup has been read back whole since the server started", "/admin/backups", "danger"));
+            }
+
+            if (view.SecurityEvents24h is > 0 and var count)
+            {
+                items.Add(new(string.Create(CultureInfo.InvariantCulture, $"{count} security event{(count == 1 ? "" : "s")} in the last day"), "/admin/audit", "warn"));
+            }
+        }
+
+        return items;
+    }
+
+    private async Task<IEnumerable<KeySummary>> EndingKeysAsync(int owner, DateTime now)
+    {
+        try
+        {
+            return (await Vaults.With<KeyService, IReadOnlyList<KeySummary>>(service => service.ListAsync(Vaults.Caller, owner)))
+                .Where(key => key.IsActive(now) && key.ExpiresUtc is { } until && until <= now.AddDays(KeyDays))
+                .OrderBy(key => key.ExpiresUtc);
+        }
+        catch (DomainException)
+        {
+            return [];
+        }
+    }
+
+    // Every keystroke asks again; only the answer to the last one is shown.
+    private async Task Search()
+    {
+        var mine = ++asked;
+        var text = query.Trim();
+        if (text.Length < SecretService.MinimumSearchLength)
+        {
+            (found, searched) = ([], false);
+            return;
+        }
+
+        IReadOnlyList<SecretSummary> result;
+        try
+        {
+            result = await Vaults.Run(service => service.SearchAsync(text, Vaults.Caller, SearchLimit));
+        }
+        catch (DomainException)
+        {
+            return;
+        }
+
+        if (mine == asked)
+        {
+            (found, searched) = (result, true);
+        }
+    }
+
+    private void Open() => (name, description, folder, dialogProblem, open) = ("", null, "", null, true);
+
+    private void Close() => (open, dialogProblem) = (false, null);
+
+    private async Task Create()
+    {
+        // A refusal is said inside the form, which stays open with what was typed.
+        dialogProblem = await Vaults.Try(service => service.CreateVaultAsync(name.Trim(), description, Vaults.Caller, folder.Length == 0 ? null : folder));
+        if (dialogProblem is null)
+        {
+            open = false;
+            Vaults.ChangedVaults();
+            await Load();
+        }
+    }
+}

@@ -1,0 +1,99 @@
+@page "/admin/system"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@inject SecretHive.Web.Security.ServerInfo Server
+@inject Vaults Vaults
+
+<PageTitle>System · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>System</h1>
+        <p class="sh-lede">What is running, and what it rests on.</p>
+    </div>
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>Server</h2></div>
+    <div class="sh-card-body">
+        <dl class="sh-facts">
+            <dt>Version</dt><dd class="sh-mono">@Server.Version</dd>
+            <dt>Started</dt><dd>@Server.StartedUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) UTC</dd>
+            <dt>Database</dt><dd>@Server.DatabaseProvider</dd>
+            <dt>Data folder</dt><dd class="sh-mono">@Server.DataDirectory</dd>
+            <dt>Vaults</dt><dd>@vaults</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header">
+        <h2>Encryption on the wire</h2>
+        @if (Server.Tls is null)
+        {
+            <span class="sh-badge sh-badge-danger">off</span>
+        }
+        else if (Server.Tls.SelfSigned)
+        {
+            <span class="sh-badge sh-badge-warn">own certificate</span>
+        }
+        else
+        {
+            <span class="sh-badge sh-badge-ok">supplied certificate</span>
+        }
+    </div>
+    <div class="sh-card-body">
+        @if (Server.Tls is { } tls)
+        {
+            <dl class="sh-facts">
+                <dt>HTTPS port</dt><dd class="sh-mono">@Server.HttpsPort</dd>
+                <dt>Certificate</dt><dd>@tls.Source</dd>
+                <dt>Subject</dt><dd class="sh-mono">@tls.Certificate.Subject</dd>
+                <dt>Valid until</dt><dd>@tls.Certificate.NotAfter.ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</dd>
+                <dt>SHA-256 thumbprint</dt><dd class="sh-mono">@tls.Certificate.GetCertHashString(System.Security.Cryptography.HashAlgorithmName.SHA256)</dd>
+                <dt>HTTP port</dt><dd><span class="sh-mono">@Server.HttpPort</span>, answers a health probe and sends everything else to HTTPS</dd>
+            </dl>
+            @if (tls.SelfSigned)
+            {
+                <p class="sh-muted sh-small" style="margin-bottom: 0">
+                    The server made this certificate for itself. It encrypts, but a browser or a tool does not trust it
+                    until told to: compare the thumbprint above, or put a certificate of your own in place with
+                    <span class="sh-mono">SecretHive__Tls__CertificateFile</span> and <span class="sh-mono">SecretHive__Tls__KeyFile</span>.
+                </p>
+            }
+        }
+        else
+        {
+            <p style="margin: 0">TLS is switched off. Every value, and the administrator token, crosses the network readable.</p>
+        }
+    </div>
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>Keys</h2></div>
+    <div class="sh-card-body">
+        <dl class="sh-facts">
+            <dt>Master key</dt><dd><span class="sh-mono">@Server.MasterKeyId</span> <span class="sh-muted">an id derived from the key, not the key</span></dd>
+            @if (Server.RetiredMasterKeyIds.Count > 0)
+            {
+                <dt>Retired master keys</dt>
+                <dd>
+                    <span class="sh-mono">@string.Join(", ", Server.RetiredMasterKeyIds)</span>
+                    <span class="sh-muted">
+                        still named in the configuration. Everything they protected was moved under the current key
+                        when the server started: make a fresh backup, then take them out of the configuration and
+                        destroy them.
+                    </span>
+                </dd>
+            }
+            <dt>Trusted proxies</dt>
+            <dd class="sh-mono">@(Server.TrustedProxies.Count == 0 ? "none: a forwarded address is ignored" : string.Join(", ", Server.TrustedProxies))</dd>
+        </dl>
+    </div>
+</div>
+
+@code {
+    private int vaults;
+
+    protected override async Task OnInitializedAsync() => vaults = (await Vaults.Run(service => service.ListVaultsAsync(Vaults.Caller))).Count;
+}

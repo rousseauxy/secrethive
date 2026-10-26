@@ -1,0 +1,85 @@
+@*
+    The admin area's frame: one navigation for everything that is not a vault. Nested inside MainLayout, because the
+    header, the theme switch and the user menu belong on these pages too.
+
+    The same links are rendered twice: as a column beside the page on a wide screen, and as a menu that opens from a
+    bar on a narrow one. A <details>, so it opens with no script.
+*@
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<div class="sh-admin-shell">
+    <nav class="sh-admin-nav" aria-label="Admin">
+        @Links
+    </nav>
+
+    <details class="sh-admin-menu" data-menu>
+        <summary>
+            <span aria-hidden="true">☰</span>
+            <span>Admin</span>
+            <span class="sh-admin-menu-current">@Current</span>
+            <span class="sh-admin-menu-caret" aria-hidden="true">▾</span>
+        </summary>
+        <nav class="sh-admin-menu-panel" aria-label="Admin">
+            @Links
+        </nav>
+    </details>
+
+    <div class="sh-admin-body">
+        @Body
+    </div>
+</div>
+
+@code {
+    private sealed record NavLink(string Label, string Href);
+
+    private sealed record NavGroup(string Title, IReadOnlyList<NavLink> Links);
+
+    private static readonly IReadOnlyList<NavGroup> Groups =
+    [
+        new("Manage",
+        [
+            new("Folders", "/admin/folders"),
+            new("Bin", "/admin/bin"),
+            new("Audit log", "/admin/audit"),
+            new("Retention", "/admin/retention"),
+            new("Backups", "/admin/backups"),
+            new("Appearance", "/admin/appearance"),
+            new("System", "/admin/system"),
+        ]),
+        new("Authentication",
+        [
+            new("Users", "/admin/users"),
+            new("Groups", "/admin/groups"),
+            new("Tokens", "/admin/tokens"),
+            new("Networks", "/admin/networks"),
+            new("Providers", "/admin/providers"),
+        ]),
+    ];
+
+    private RenderFragment Links => @<text>
+        @foreach (var group in Groups)
+        {
+            <div class="sh-admin-group">
+                <span class="sh-admin-title">@group.Title</span>
+                @foreach (var link in group.Links)
+                {
+                    <a class="sh-admin-link @(IsActive(link) ? "active" : "")" href="@link.Href" aria-current="@(IsActive(link) ? "page" : null)">@link.Label</a>
+                }
+            </div>
+        }
+    </text>;
+
+    private string? Current => Groups.SelectMany(group => group.Links).FirstOrDefault(IsActive)?.Label;
+
+    private bool IsActive(NavLink link) =>
+        new Uri(Navigation.Uri).AbsolutePath.StartsWith(link.Href, StringComparison.OrdinalIgnoreCase);
+
+    protected override void OnInitialized() => Navigation.LocationChanged += Changed;
+
+    private void Changed(object? sender, LocationChangedEventArgs e) => StateHasChanged();
+
+    public void Dispose() => Navigation.LocationChanged -= Changed;
+}

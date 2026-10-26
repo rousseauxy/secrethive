@@ -1,0 +1,63 @@
+@page "/admin/audit"
+@page "/audit"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@inject Vaults Vaults
+
+<PageTitle>Audit · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Audit trail</h1>
+        <p class="sh-lede">Every event, newest first, @PageSize to a page. Every value read is here; no value ever is.</p>
+    </div>
+</div>
+
+<div class="sh-card">
+    <AuditTable Rows="rows" />
+    @* Back through the whole trail: each page starts below the last row of the one before. *@
+    <div class="sh-pager">
+        <button class="sh-btn sh-btn-sm" disabled="@(cursors.Count == 1)" @onclick="Newer"><Icon Name="left" /> Newer</button>
+        <span class="sh-muted sh-small">Page @cursors.Count</span>
+        <button class="sh-btn sh-btn-sm" disabled="@(!more)" @onclick="Older">Older <Icon Name="right" /></button>
+        <button class="sh-btn sh-btn-sm sh-pager-end" title="Back to the newest events" @onclick="Newest"><Icon Name="refresh" /> Newest</button>
+    </div>
+</div>
+
+@code {
+    private const int PageSize = 50;
+
+    private IReadOnlyList<AuditEvent> rows = [];
+    private bool more;
+
+    // Where each page shown so far starts: null for the newest, then the id the page before ended above.
+    private readonly List<long?> cursors = [null];
+
+    protected override Task OnInitializedAsync() => Show();
+
+    private async Task Show()
+    {
+        // One more than fits, to know whether there is an older page.
+        var found = await Vaults.Run(service => service.AuditAsync(PageSize + 1, Vaults.Caller, before: cursors[^1]));
+        rows = [.. found.Take(PageSize)];
+        more = found.Count > PageSize;
+    }
+
+    private Task Older()
+    {
+        cursors.Add(rows[^1].Id);
+        return Show();
+    }
+
+    private Task Newer()
+    {
+        cursors.RemoveAt(cursors.Count - 1);
+        return Show();
+    }
+
+    private Task Newest()
+    {
+        cursors.RemoveRange(1, cursors.Count - 1);
+        return Show();
+    }
+}

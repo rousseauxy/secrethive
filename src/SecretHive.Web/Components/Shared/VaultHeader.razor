@@ -1,0 +1,75 @@
+@* The top of every page of one vault: where it is, your role in it, and its pages. What a caller cannot use is
+   not offered: the access and network pages are for whoever manages the vault, the bin for whoever may change it. *@
+@inject Vaults Vaults
+<div class="sh-page-head">
+    <div>
+        <p class="sh-crumbs">
+            <a href="/">Vaults</a> <span class="sh-crumb-sep">/</span>
+            @if (Active == "secrets")
+            {
+                <span>@Vault</span>
+            }
+            else
+            {
+                <a href="@($"/vaults/{Vault}")">@Vault</a> <span class="sh-crumb-sep">/</span> <span>@Label(Active)</span>
+            }
+        </p>
+        <div class="sh-title-row"><h1 class="sh-mono">@Vault</h1><PinButton @key="Vault" Vault="@Vault" Pinned="pinned" /></div>
+    </div>
+    <div class="sh-right">
+        @if (Role is not null)
+        {
+            <span class="sh-badge sh-badge-accent" title="Your role in this vault">@SecretService.RoleName(Role.Value)</span>
+        }
+        @ChildContent
+    </div>
+</div>
+
+@if (CanManage || Role >= VaultRole.SecretsOfficer)
+{
+    <nav class="sh-tabs" aria-label="Pages of this vault">
+        <a class="@Class("secrets")" href="@($"/vaults/{Vault}")">Secrets</a>
+        @if (CanManage)
+        {
+            <a class="@Class("access")" href="@($"/vaults/{Vault}/access")">Access</a>
+            <a class="@Class("networks")" href="@($"/vaults/{Vault}/networks")">Networks</a>
+        }
+        @if (Role >= VaultRole.SecretsOfficer)
+        {
+            <a class="@Class("bin")" href="@($"/vaults/{Vault}/bin")">Bin</a>
+        }
+    </nav>
+}
+
+@code {
+    private bool pinned;
+
+    protected override async Task OnParametersSetAsync() =>
+        pinned = await Vaults.Run(service => service.IsPinnedAsync(Vault, null, Vaults.Caller));
+
+    [Parameter, EditorRequired]
+    public string Vault { get; set; } = "";
+
+    [Parameter]
+    public VaultRole? Role { get; set; }
+
+    [Parameter]
+    public bool CanManage { get; set; }
+
+    /// <summary>secrets, access, networks or bin.</summary>
+    [Parameter]
+    public string Active { get; set; } = "secrets";
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string Class(string page) => page == Active ? "active" : "";
+
+    private static string Label(string page) => page switch
+    {
+        "access" => "Access",
+        "networks" => "Networks",
+        "bin" => "Bin",
+        _ => "Secrets",
+    };
+}

@@ -1,0 +1,118 @@
+@* Fields are open unless ticked. A name that looks like a credential gets a nudge, never an order.
+   Three names mean something to SecretHive itself (username, url, owner): their name and their kind are fixed, so
+   a row for one of them shows the name as a label and offers nothing to choose. With Standard, username and url are
+   simply there to fill in; left empty they are not stored. *@
+@foreach (var row in Rows)
+{
+    var reserved = FieldRow.IsReserved(row.Name) && fixedRows.Contains(row);
+    <div class="sh-row sh-field-row">
+        @if (reserved)
+        {
+            <span class="sh-field-name sh-mono">@row.Name</span>
+            <input class="sh-input sh-grow" placeholder="@Hint(row.Name)" type="@(row.Name == "url" ? "url" : "text")" autocomplete="off" @bind="row.Value" />
+            @if (!(Standard && FieldRow.IsAlwaysThere(row.Name)))
+            {
+                <button type="button" class="sh-btn sh-btn-icon" title="Remove this field" @onclick="() => Remove(row)"><Icon Name="trash" /><span class="sh-sr">Remove</span></button>
+            }
+        }
+        else
+        {
+            <input class="sh-input sh-grow sh-mono" placeholder="name" @bind="row.Name" @bind:after="() => Typed(row)" />
+            <select class="sh-select" style="width: 120px" @bind="row.Type" disabled="@FieldRow.IsReserved(row.Name)">
+                @foreach (var type in Enum.GetValues<FieldType>())
+                {
+                    <option value="@type">@type.ToString().ToLowerInvariant()</option>
+                }
+            </select>
+            <input class="sh-input sh-grow" placeholder="value" type="@(row.Sensitive ? "password" : "text")" @bind="row.Value" />
+            @if (AllowSensitive)
+            {
+                <label class="sh-check"><input type="checkbox" @bind="row.Sensitive" disabled="@(row.Name == "owner")" /> sensitive</label>
+            }
+            <button type="button" class="sh-btn sh-btn-icon" title="Remove this field" @onclick="() => Remove(row)"><Icon Name="trash" /><span class="sh-sr">Remove</span></button>
+        }
+    </div>
+    @if (AllowSensitive && !reserved && !row.Sensitive && Field.LooksLikeCredential(row.Name))
+    {
+        <div class="sh-hint">"@row.Name" looks like a credential. Unticked, it is stored readable and shown to everyone who may see this vault.</div>
+    }
+}
+<div class="sh-row">
+    <button type="button" class="sh-btn sh-btn-sm" @onclick="() => Rows.Add(new FieldRow())"><Icon Name="plus" /> Add a field</button>
+    @foreach (var name in Suggested.Where(name => Rows.All(row => row.Name != name)))
+    {
+        <button type="button" class="sh-btn sh-btn-sm" @onclick="() => AddReserved(name)">+ @name</button>
+    }
+</div>
+
+@code {
+    // Rows this editor shows with a fixed name. A row somebody is typing "url" into stays an ordinary row until it
+    // is saved, so the box does not change shape under the cursor.
+    private readonly HashSet<FieldRow> fixedRows = [];
+
+    [Parameter, EditorRequired]
+    public List<FieldRow> Rows { get; set; } = default!;
+
+    [Parameter]
+    public bool AllowSensitive { get; set; } = true;
+
+    /// <summary>Username and url are always offered, first, and cannot be removed: empty means not stored.</summary>
+    [Parameter]
+    public bool Standard { get; set; }
+
+    private IEnumerable<string> Suggested => Standard ? ["owner"] : ["username", "url", "owner"];
+
+    protected override void OnParametersSet()
+    {
+        if (Standard)
+        {
+            foreach (var name in new[] { "url", "username" })
+            {
+                if (Rows.All(row => row.Name != name))
+                {
+                    Rows.Insert(0, Reserved(name));
+                }
+            }
+        }
+
+        foreach (var row in Rows.Where(row => FieldRow.IsReserved(row.Name) && !row.Sensitive))
+        {
+            fixedRows.Add(row);
+        }
+    }
+
+    private void AddReserved(string name)
+    {
+        var row = Reserved(name);
+        fixedRows.Add(row);
+        Rows.Add(row);
+    }
+
+    private void Remove(FieldRow row)
+    {
+        fixedRows.Remove(row);
+        Rows.Remove(row);
+    }
+
+    private static FieldRow Reserved(string name) => new() { Name = name, Type = name == "url" ? FieldType.Url : FieldType.Text };
+
+    private static string Hint(string name) => name switch
+    {
+        "username" => "the account this secret is the password of",
+        "url" => "https://… where it is used",
+        _ => "who to ask about it",
+    };
+
+    // The reserved names have a fixed type; set it as soon as the name is typed, so the form cannot disagree.
+    private static void Typed(FieldRow row)
+    {
+        if (row.Name is "username" or "owner")
+        {
+            row.Type = FieldType.Text;
+        }
+        else if (row.Name == "url")
+        {
+            row.Type = FieldType.Url;
+        }
+    }
+}

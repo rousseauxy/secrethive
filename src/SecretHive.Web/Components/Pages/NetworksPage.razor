@@ -1,0 +1,156 @@
+@page "/admin/networks"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@using SecretHive.Application.Accounts
+@inject Vaults Vaults
+
+<PageTitle>Networks · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Networks</h1>
+        <p class="sh-lede">
+            A network group is a named list of address ranges, defined once. Vaults and keys list groups, so changing
+            a group changes every vault and key that lists it, at once. A group limits nothing by itself.
+        </p>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+
+@foreach (var group in groups)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2 class="sh-mono">@group.Name</h2>
+            <span class="sh-muted sh-small">@group.Description</span>
+            <span class="sh-badge">@Reach(group)</span>
+            <div class="sh-right">
+                @if (deleting == group.Key)
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Do(service => service.DeleteAsync(group.Key, Vaults.Caller))">Delete</button>
+                    <button class="sh-btn sh-btn-sm" @onclick="() => deleting = null">Cancel</button>
+                }
+                else
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => deleting = group.Key">Delete…</button>
+                }
+            </div>
+        </div>
+        <div class="sh-card-body">
+            <form class="sh-form" @onsubmit="() => Save(group)">
+                <div class="sh-field">
+                    <label class="sh-label">Ranges</label>
+                    <textarea class="sh-textarea" rows="@Math.Max(3, group.Ranges.Count + 1)" @bind="editing[group.Key].Ranges" placeholder="192.168.10.0/24"></textarea>
+                    <span class="sh-hint">
+                        One per line. Adding a range opens every vault and key that lists this group to it at once,
+                        and is written down as a security event.
+                    </span>
+                </div>
+                <div class="sh-field">
+                    <label class="sh-label">Description</label>
+                    <input class="sh-input" @bind="editing[group.Key].Description" />
+                </div>
+                <div class="sh-form-actions"><button class="sh-btn" type="submit">Save</button></div>
+            </form>
+        </div>
+    </div>
+}
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>New network group</h2></div>
+    <div class="sh-card-body">
+        <form class="sh-form" @onsubmit="Create">
+            <div class="sh-field">
+                <label class="sh-label">Name</label>
+                <input class="sh-input sh-mono" @bind="fresh.Name" placeholder="tailnet" />
+                <span class="sh-hint">Letters, digits and hyphens.</span>
+            </div>
+            <div class="sh-field">
+                <label class="sh-label">Ranges</label>
+                <textarea class="sh-textarea" rows="3" @bind="fresh.Ranges" placeholder="100.64.0.0/10"></textarea>
+                <span class="sh-hint">One per line: a range such as 192.168.10.0/24, or one address.</span>
+            </div>
+            <div class="sh-field">
+                <label class="sh-label">Description</label>
+                <input class="sh-input" @bind="fresh.Description" />
+            </div>
+            <div class="sh-form-actions"><button class="sh-btn sh-btn-primary" type="submit">Create group</button></div>
+        </form>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<NetworkGroupSummary> groups = [];
+    private readonly Dictionary<int, Form> editing = [];
+    private Form fresh = new();
+    private int? deleting;
+    private string? problem;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private static string Reach(NetworkGroupSummary group) =>
+        group.Vaults + group.Keys == 0 ? "listed nowhere" : $"listed by {group.Vaults} vault{(group.Vaults == 1 ? "" : "s")} and {group.Keys} key{(group.Keys == 1 ? "" : "s")}";
+
+    private async Task Load()
+    {
+        groups = await Vaults.With<NetworkService, IReadOnlyList<NetworkGroupSummary>>(service => service.ListAsync(Vaults.Caller));
+        editing.Clear();
+        foreach (var group in groups)
+        {
+            editing[group.Key] = new Form { Name = group.Name, Ranges = string.Join('\n', group.Ranges), Description = group.Description };
+        }
+
+        deleting = null;
+    }
+
+    private async Task<bool> Do(Func<NetworkService, Task> act)
+    {
+        var done = true;
+        try
+        {
+            problem = null;
+            await Vaults.With<NetworkService, bool>(async service =>
+            {
+                await act(service);
+                return true;
+            });
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+            done = false;
+        }
+
+        if (done)
+        {
+            await Load();
+        }
+
+        return done;
+    }
+
+    private Task Save(NetworkGroupSummary group)
+    {
+        var form = editing[group.Key];
+        return Do(service => service.UpdateAsync(group.Key, form.Description, form.Ranges, Vaults.Caller));
+    }
+
+    private async Task Create()
+    {
+        var form = fresh;
+        if (await Do(service => service.CreateAsync((form.Name ?? "").Trim(), form.Description, form.Ranges, Vaults.Caller)))
+        {
+            fresh = new();
+        }
+    }
+
+    private sealed class Form
+    {
+        public string? Name { get; set; }
+
+        public string? Ranges { get; set; }
+
+        public string? Description { get; set; }
+    }
+}

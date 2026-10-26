@@ -1,0 +1,244 @@
+@using SecretHive.Application.Accounts
+@inject Vaults Vaults
+
+@* The keys of one identity: your own on the profile page, a service's on the tokens page. A key is shown once, when
+   it is made; after that only its first characters, its limits and when it was last used. *@
+<Problem Message="@problem" />
+
+@if (fresh is not null)
+{
+    <div class="sh-note">
+        <b>This is the key. It is shown once.</b> Copy it now; only its first characters are kept.
+        <div class="sh-secret" style="margin-top: 8px">
+            <span class="sh-secret-value">@fresh</span>
+            <button type="button" class="sh-btn sh-btn-sm" @onclick="() => fresh = null">Done</button>
+        </div>
+    </div>
+}
+
+<form class="sh-form sh-keyform" @onsubmit="Create">
+    <div class="sh-row">
+        <label class="sh-field sh-grow">
+            <span class="sh-label">Key name</span>
+            <input class="sh-input" placeholder="e.g. deploy job" @bind="label" />
+        </label>
+        <label class="sh-field">
+            <span class="sh-label">Expires <span class="sh-muted">(empty: never)</span></span>
+            <input class="sh-input" type="date" @bind="expires" min="@Today.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)" max="@Today.AddDays(KeyService.MaxDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)" />
+        </label>
+        <label class="sh-field">
+            <span class="sh-label">Vault <span class="sh-muted">(optional)</span></span>
+            <select class="sh-select" @bind="vault">
+                <option value="">every vault</option>
+                @foreach (var name in vaults)
+                {
+                    <option value="@name">only @name</option>
+                }
+            </select>
+        </label>
+        <label class="sh-field">
+            <span class="sh-label">Highest role <span class="sh-muted">(optional)</span></span>
+            <select class="sh-select" @bind="maxRole">
+                <option value="">follows its owner's role</option>
+                @foreach (var option in VaultRoles.All)
+                {
+                    <option value="@option">at most @SecretService.RoleName(option)</option>
+                }
+            </select>
+        </label>
+        <button class="sh-btn sh-btn-primary" type="submit">Generate new key</button>
+    </div>
+    @if (expires is null)
+    {
+        <div class="sh-note" style="margin: 0">
+            <b>No end date.</b> This key will work until someone revokes it: nothing ends it if it is lost or forgotten,
+            and nothing reminds you to replace it. Limit it to a vault and to a network where you can.
+        </div>
+    }
+    <span class="sh-hint">
+        A key acts as its owner and never as more: with no highest role it follows its owner's role, with one it stays at or
+        below it. At most @KeyService.MaxActiveKeys work at once: the one in use and the one being rolled out. A date is at
+        most @KeyService.MaxDays days from today; without one the key has no end.
+    </span>
+</form>
+
+@if (keys.Count == 0)
+{
+    <p class="sh-muted" style="margin: 0">No keys yet.</p>
+}
+else
+{
+    <div class="sh-table-wrap">
+        <table class="sh-table">
+            <thead><tr><th>Name</th><th>Key</th><th>Reach</th><th>Expires</th><th>Last used</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var key in keys)
+                {
+                    <tr>
+                        <td>@key.Label</td>
+                        <td class="sh-mono">shv_@(key.Prefix)…</td>
+                        <td class="sh-small">
+                            <div>@(key.Vault is null ? "every vault its owner has a role in" : "vault " + key.Vault)</div>
+                            @if (key.IsActive(DateTime.UtcNow))
+                            {
+                                @* The limit of a working key can be changed in place: no new key to roll out. *@
+                                <select class="sh-select" style="width: 210px; margin-top: 4px" aria-label="The highest role this key acts with"
+                                        value="@(key.MaxRole?.ToString() ?? "")" @onchange="e => Limit(key, (string?)e.Value)">
+                                    <option value="">follows its owner's role</option>
+                                    @foreach (var option in VaultRoles.All)
+                                    {
+                                        <option value="@option">at most @SecretService.RoleName(option)</option>
+                                    }
+                                </select>
+                            }
+                            else if (key.MaxRole is { } max)
+                            {
+                                <div>at most @SecretService.RoleName(max), whatever its owner holds</div>
+                            }
+                            else
+                            {
+                                <div>follows its owner's role</div>
+                            }
+                        </td>
+                        <td class="sh-nowrap">
+                            @if (key.RevokedUtc is not null)
+                            {
+                                <span class="sh-badge sh-badge-danger">revoked</span>
+                            }
+                            else if (key.ExpiresUtc is not { } ends)
+                            {
+                                <span class="sh-badge sh-badge-warn" title="Works until it is revoked">never</span>
+                            }
+                            else if (ends <= DateTime.UtcNow)
+                            {
+                                <span class="sh-badge sh-badge-danger">expired</span>
+                            }
+                            else
+                            {
+                                <span class="@(ends < DateTime.UtcNow.AddDays(7) ? "sh-badge sh-badge-warn" : "sh-badge sh-badge-ok")">@ends.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+                            }
+                        </td>
+                        <td class="sh-muted sh-small">@(key.LastUsedUtc?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "never") @key.LastUsedAddress</td>
+                        <td>
+                            @if (key.IsActive(DateTime.UtcNow))
+                            {
+                                <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Revoke(key)">Revoke</button>
+                            }
+                        </td>
+                    </tr>
+                    @if (key.IsActive(DateTime.UtcNow))
+                    {
+                        <tr class="sh-subrow">
+                            <td class="sh-muted sh-small">from</td>
+                            <td colspan="5">
+                                <NetworkList Lines="key.Networks" Groups="networkGroups" Anywhere="Not limited: works from any address."
+                                             OnAdd="line => Network(service => service.AllowNetworkAsync(Vaults.Caller, key.Key, line.GroupKey, line.Range))"
+                                             OnRemove="lineKey => Network(service => service.DisallowNetworkAsync(Vaults.Caller, key.Key, lineKey))" />
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<KeySummary> keys = [];
+    private IReadOnlyList<string> vaults = [];
+    private IReadOnlyList<(int Key, string Name)> networkGroups = [];
+    private string? problem;
+    private string? fresh;
+    private string label = "";
+    private string vault = "";
+    private string maxRole = "";
+    private DateOnly? expires = Today.AddDays(KeyService.DefaultDays);
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    /// <summary>The identity whose keys these are.</summary>
+    [Parameter, EditorRequired]
+    public int OwnerKey { get; set; }
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            keys = await Vaults.With<KeyService, IReadOnlyList<KeySummary>>(service => service.ListAsync(Vaults.Caller, OwnerKey));
+            vaults = [.. (await Vaults.Run(service => service.ListVaultsAsync(Vaults.Caller))).Select(item => item.Name)];
+            networkGroups = await Vaults.With<NetworkService, IReadOnlyList<(int, string)>>(service => service.ListNamesAsync());
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    private async Task Create()
+    {
+        try
+        {
+            problem = null;
+            var made = await Vaults.With<KeyService, (KeySummary Key, string Secret)>(service => service.CreateAsync(
+                Vaults.Caller,
+                OwnerKey,
+                label,
+                expires is { } date ? date.DayNumber - Today.DayNumber : null,
+                vault.Length == 0 ? null : vault,
+                maxRole.Length == 0 ? null : Enum.Parse<VaultRole>(maxRole)));
+            fresh = made.Secret;
+            label = vault = maxRole = "";
+            expires = Today.AddDays(KeyService.DefaultDays);
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+
+        await Load();
+    }
+
+    private async Task Network(Func<KeyService, Task> act)
+    {
+        string? said = null;
+        try
+        {
+            await Vaults.With<KeyService, bool>(async service =>
+            {
+                await act(service);
+                return true;
+            });
+        }
+        catch (DomainException e)
+        {
+            said = e.Message;
+        }
+
+        await Load();
+        problem = said;
+    }
+
+    private Task Limit(KeySummary key, string? chosen) =>
+        Network(service => service.SetMaxRoleAsync(Vaults.Caller, key.Key, string.IsNullOrEmpty(chosen) ? null : Enum.Parse<VaultRole>(chosen)));
+
+    private async Task Revoke(KeySummary key)
+    {
+        try
+        {
+            problem = null;
+            await Vaults.With<KeyService, bool>(async service =>
+            {
+                await service.RevokeAsync(Vaults.Caller, key.Key);
+                return true;
+            });
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+
+        await Load();
+    }
+}

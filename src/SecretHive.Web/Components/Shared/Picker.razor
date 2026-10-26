@@ -1,0 +1,122 @@
+@* A choice out of many, found by typing: accounts and groups. The same field as the coded fields of the sibling
+   applications: a text box with a suggestion list hanging from it, the name in bold and what it is beside
+   it. The list narrows as you type; the arrow keys or the mouse move through it, Enter takes the marked one, Escape
+   closes it. A short, fixed set of choices (roles, types) is a plain select instead. *@
+<div class="sh-picker" style="@Style">
+    <input class="sh-input" type="text" role="combobox" autocomplete="off" spellcheck="false"
+           aria-expanded="@(open ? "true" : "false")" aria-autocomplete="list"
+           placeholder="@Placeholder" value="@(open ? filter : SelectedLabel)"
+           @onfocus="Open" @onclick="Open" @oninput="Typed" @onkeydown="Key" @onblur="Close" />
+    @if (open)
+    {
+        <ul class="sh-picker-list" role="listbox">
+            @if (matches.Count == 0)
+            {
+                <li class="sh-picker-none">Nothing matches "@filter".</li>
+            }
+            @for (var i = 0; i < matches.Count; i++)
+            {
+                var item = matches[i];
+                var index = i;
+                @* mousedown, not click: it comes before the box loses focus and the list closes. *@
+                <li class="sh-picker-option @(index == marked ? "marked" : "") @(item.Value == Value ? "chosen" : "")" role="option"
+                    @onmousedown="() => Choose(item)" @onmousedown:preventDefault @onmouseover="() => marked = index">
+                    <span class="sh-picker-name">@item.Label</span>
+                    @if (!string.IsNullOrEmpty(item.Kind))
+                    {
+                        <span class="sh-picker-kind">— @item.Kind</span>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    /// <summary>One thing that can be chosen: what the form gets, a word for its kind, and its name.</summary>
+    public sealed record Item(string Value, string Kind, string Label);
+
+    private IReadOnlyList<Item> matches = [];
+    private string filter = "";
+    private bool open;
+    private int marked;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Item> Items { get; set; } = [];
+
+    [Parameter]
+    public string Value { get; set; } = "";
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public string Placeholder { get; set; } = "Type to search…";
+
+    [Parameter]
+    public string? Style { get; set; }
+
+    private string SelectedLabel => Items.FirstOrDefault(item => item.Value == Value) is { } chosen
+        ? (string.IsNullOrEmpty(chosen.Kind) ? chosen.Label : $"{chosen.Label} — {chosen.Kind}")
+        : "";
+
+    // Also on a click: after a choice the box keeps the focus, so a second look starts with a click, not a focus.
+    private void Open()
+    {
+        if (open)
+        {
+            return;
+        }
+
+        filter = "";
+        open = true;
+        Narrow();
+    }
+
+    private void Close() => open = false;
+
+    private void Typed(ChangeEventArgs e)
+    {
+        // The page's script selects the shown name so typing replaces it. Should text still arrive behind that name,
+        // only what was typed is the search.
+        var text = e.Value?.ToString() ?? "";
+        filter = SelectedLabel.Length > 0 && text.Length > SelectedLabel.Length && text.StartsWith(SelectedLabel, StringComparison.Ordinal) ? text[SelectedLabel.Length..] : text;
+        open = true;
+        Narrow();
+    }
+
+    private void Narrow()
+    {
+        var words = filter.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        matches = [.. Items.Where(item => words.All(word =>
+            item.Label.Contains(word, StringComparison.OrdinalIgnoreCase) || item.Kind.Contains(word, StringComparison.OrdinalIgnoreCase)))];
+        marked = 0;
+    }
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                open = true;
+                marked = matches.Count == 0 ? 0 : Math.Min(marked + 1, matches.Count - 1);
+                break;
+            case "ArrowUp":
+                marked = Math.Max(marked - 1, 0);
+                break;
+            case "Enter" when open && marked < matches.Count:
+                await Choose(matches[marked]);
+                break;
+            case "Escape":
+                open = false;
+                break;
+        }
+    }
+
+    private async Task Choose(Item item)
+    {
+        open = false;
+        Value = item.Value;
+        await ValueChanged.InvokeAsync(item.Value);
+    }
+}

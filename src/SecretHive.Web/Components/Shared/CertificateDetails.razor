@@ -1,0 +1,52 @@
+@* What a certificate says about itself, and its parts: each one to download, a private one on record; a PFX
+   password is revealed like a value, through Read. *@
+@if (Secret.Certificate is { } certificate)
+{
+    <dl class="sh-facts">
+        <dt>Subject</dt><dd class="sh-mono">@certificate.Subject</dd>
+        <dt>Names</dt><dd class="sh-mono">@string.Join(", ", certificate.AlternativeNames)</dd>
+        <dt>Issuer</dt><dd class="sh-mono">@certificate.Issuer</dd>
+        <dt>Valid</dt><dd>@certificate.NotBeforeUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) to @certificate.NotAfterUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</dd>
+        <dt>Serial</dt><dd class="sh-mono">@certificate.Serial</dd>
+        <dt>SHA-1 thumbprint</dt><dd class="sh-mono">@certificate.Sha1Thumbprint</dd>
+        <dt>SHA-256 thumbprint</dt><dd class="sh-mono">@certificate.Thumbprint</dd>
+    </dl>
+}
+<table class="sh-table sh-parts">
+    <thead><tr><th>Part</th><th>File</th><th></th></tr></thead>
+    <tbody>
+        @foreach (var part in Secret.Parts ?? [])
+        {
+            <tr>
+                <td class="sh-mono">@part.Kind @if (part.Private) { <span class="sh-badge sh-badge-warn">private</span> }</td>
+                <td class="sh-mono">@part.FileName</td>
+                <td>
+                    @if (part.Kind == "pfx-password")
+                    {
+                        <RevealBox @key="@($"pw-{Secret.VersionId}")" Read="@(() => Read("part:pfx-password"))" />
+                    }
+                    else
+                    {
+                        <a class="sh-btn sh-btn-sm" href="@($"/api/v1/vaults/{Vault}/certificates/{Secret.Name}/parts/{part.Kind}")" download="@part.FileName">Download</a>
+                        @if (part.Private)
+                        {
+                            <span class="sh-muted sh-small"> recorded in the audit trail</span>
+                        }
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Vault { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public SecretSummary Secret { get; set; } = default!;
+
+    /// <summary>Reads a slot of the current version and gives it as text.</summary>
+    [Parameter, EditorRequired]
+    public Func<string, Task<string>> Read { get; set; } = default!;
+}

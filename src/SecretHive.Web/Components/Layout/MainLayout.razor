@@ -1,0 +1,51 @@
+@inherits LayoutComponentBase
+@inject Vaults Vaults
+@inject SecretHive.Web.Security.ServerInfo Server
+@inject SecretHive.Web.Theming.IThemeService Themes
+@inject SecretHive.Web.Theming.ThemeChoice Theme
+
+<header class="sh-topbar">
+    <div class="sh-topbar-inner">
+        <a class="sh-brand" href="/">
+            @{ var brand = Themes.GetBrand(Theme.Name); }
+            <img class="sh-brand-logo" src="@(brand.LogoUrl ?? "favicon.svg")" alt="@(brand.HideTitle ? brand.LogoAlt : "")" />
+            @if (!brand.HideTitle)
+            {
+                <span>@brand.Title</span>
+            }
+        </a>
+        <nav class="sh-nav" aria-label="Main">
+            <NavLink href="/" Match="NavLinkMatch.All">Vaults</NavLink>
+        </nav>
+        <div class="sh-topbar-right">
+            @* app.js paints the glyph and flips the attribute the stylesheet keys off. *@
+            <button type="button" class="sh-theme-btn" data-theme-toggle title="Switch between light and dark" aria-label="Switch between light and dark"></button>
+
+            @* One door into everything that is not a vault. A <details>, so it opens with no script at all. *@
+            <details class="sh-menu" data-menu>
+                <summary>
+                    <span>@Vaults.Caller.Principal</span>
+                    <span class="sh-menu-caret" aria-hidden="true">&#9662;</span>
+                </summary>
+                <div class="sh-menu-panel">
+                    <div class="sh-menu-who">Signed in as @Vaults.Caller.Principal</div>
+                    <a href="/account/profile">Profile</a>
+                    @if (Vaults.IsAdmin)
+                    {
+                        <a href="/admin/users">Admin</a>
+                    }
+                    <hr />
+                    @* A POST, because a sign-out that is a link can be triggered from any page a reader visits. *@
+                    <form method="post" action="/logout" data-enhance-nav="false">
+                        <input type="hidden" name="@Vaults.FormTokenName" value="@Vaults.FormToken" />
+                        <button type="submit" class="sh-menu-button">Sign out</button>
+                    </form>
+                    <div class="sh-menu-version">@Server.Version</div>
+                </div>
+            </details>
+        </div>
+    </div>
+</header>
+<main class="sh-main">
+    @Body
+</main>

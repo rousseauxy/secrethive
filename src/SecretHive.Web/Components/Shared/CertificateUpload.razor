@@ -1,0 +1,60 @@
+@* The files of one certificate, in whatever forms there are. They are checked against each other on the server:
+   every part has to be the same certificate, and a PKCS#12 file needs the password that opens it. *@
+<div class="sh-field">
+    <label class="sh-label">Certificate (.cer, .crt)</label>
+    <InputFile class="sh-input" OnChange="@(e => Pick(CertificatePartKind.Certificate, e))" />
+</div>
+<div class="sh-field">
+    <label class="sh-label">Chain (.pem, leaf first)</label>
+    <InputFile class="sh-input" OnChange="@(e => Pick(CertificatePartKind.Chain, e))" />
+</div>
+<div class="sh-field">
+    <label class="sh-label">Private key (.key, .pem, unencrypted)</label>
+    <InputFile class="sh-input" OnChange="@(e => Pick(CertificatePartKind.Key, e))" />
+</div>
+<div class="sh-field">
+    <label class="sh-label">PKCS#12 file (.pfx, .p12)</label>
+    <InputFile class="sh-input" OnChange="@(e => Pick(CertificatePartKind.Pfx, e))" />
+</div>
+<div class="sh-field">
+    <label class="sh-label">Password of the PKCS#12 file</label>
+    <input class="sh-input" type="password" autocomplete="off" @bind="Password" />
+    <span class="sh-hint">Needed with a .pfx, so the file can be opened and checked. It is stored with it.</span>
+</div>
+<Problem Message="@problem" />
+
+@code {
+    private readonly Dictionary<CertificatePartKind, CertificatePart> files = [];
+    private string? problem;
+
+    public string Password { get; set; } = "";
+
+    /// <summary>What was picked, as parts for an import.</summary>
+    public IReadOnlyList<CertificatePart> Parts()
+    {
+        var parts = files.Values.ToList();
+        if (files.ContainsKey(CertificatePartKind.Pfx))
+        {
+            parts.Add(new CertificatePart(CertificatePartKind.PfxPassword, "", Encoding.UTF8.GetBytes(Password)));
+        }
+
+        return parts;
+    }
+
+    private async Task Pick(CertificatePartKind kind, InputFileChangeEventArgs e)
+    {
+        problem = null;
+        try
+        {
+            using var buffer = new MemoryStream();
+            await using var stream = e.File.OpenReadStream(CertificateParts.MaxPartBytes);
+            await stream.CopyToAsync(buffer);
+            files[kind] = new CertificatePart(kind, e.File.Name, buffer.ToArray());
+        }
+        catch (IOException)
+        {
+            files.Remove(kind);
+            problem = $"{e.File.Name} is larger than {CertificateParts.MaxPartBytes / 1024} KB.";
+        }
+    }
+}

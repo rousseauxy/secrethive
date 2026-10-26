@@ -1,0 +1,60 @@
+@* A form that would crowd the page it belongs to, shown over it when asked for. Escape and the cross close it
+   without doing anything; a click beside it does not, because a stray click, or a text selection dragged out of a
+   box, would throw away what was typed. Nothing in it is on the page while it is closed. *@
+@if (Open)
+{
+    <div class="sh-dialog-backdrop">
+        <div class="sh-dialog @(Wide ? "sh-dialog-wide" : "")" role="dialog" aria-modal="true" aria-label="@Title" tabindex="-1"
+             @ref="panel" @onkeydown="Key">
+            <div class="sh-dialog-head">
+                <h2>@Title</h2>
+                <button type="button" class="sh-btn sh-btn-icon" title="Close" @onclick="Close"><Icon Name="close" /><span class="sh-sr">Close</span></button>
+            </div>
+            <div class="sh-dialog-body">
+                @ChildContent
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference panel;
+    private bool wasOpen;
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public bool Open { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public bool Wide { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    // Focus goes into the dialog when it opens, so Escape reaches it and the keyboard starts inside the form.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Open && !wasOpen)
+        {
+            try
+            {
+                await panel.FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // The page is being left; there is nothing to focus.
+            }
+        }
+
+        wasOpen = Open;
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private Task Key(KeyboardEventArgs e) => e.Key == "Escape" ? Close() : Task.CompletedTask;
+}

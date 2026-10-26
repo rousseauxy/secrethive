@@ -1,0 +1,200 @@
+@*
+    The frame of every page of one vault: the vaults the caller has a role in, beside the page, so another one is one
+    click away. Nested inside MainLayout. As in the admin area, the list is a column on a wide screen and a menu that
+    opens from a bar on a narrow one; these pages use the whole width of the screen, because a vault's list of
+    secrets and the panel of one of them sit side by side.
+*@
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject Vaults Vaults
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<div class="sh-admin-shell sh-workspace">
+    <nav class="sh-admin-nav sh-vaultnav" aria-label="Vaults">
+        @List
+    </nav>
+
+    <details class="sh-admin-menu" data-menu>
+        <summary>
+            <span aria-hidden="true">☰</span>
+            <span>Vaults</span>
+            <span class="sh-admin-menu-current sh-mono">@Current</span>
+            <span class="sh-admin-menu-caret" aria-hidden="true">▾</span>
+        </summary>
+        <nav class="sh-admin-menu-panel sh-vaultnav" aria-label="Vaults">
+            @List
+        </nav>
+    </details>
+
+    <div class="sh-admin-body">
+        @Body
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<VaultPlace> vaults = [];
+    private string filter = "";
+
+    private RenderFragment List => @<text>
+        <a class="sh-admin-link sh-vaultnav-all @(IsHome ? "active" : "")" href="/" aria-current="@(IsHome ? "page" : null)">All vaults</a>
+        @if (vaults.Count > 8)
+        {
+            <input class="sh-input sh-vaultnav-filter" type="search" placeholder="Filter vaults" aria-label="Filter vaults" autocomplete="off" spellcheck="false"
+                   @bind="filter" @bind:event="oninput" />
+        }
+        <div class="sh-admin-group" role="tree">
+            @Branch(Tree(Shown), 0)
+            @if (!Shown.Any())
+            {
+                <span class="sh-muted sh-small sh-vaultnav-none">@(vaults.Count == 0 ? "No vaults." : "Nothing matches.")</span>
+            }
+        </div>
+    </text>;
+
+    // One level of the tree: its folders, each with what is in it unless folded, then its vaults.
+    private RenderFragment Branch(Node node, int depth) => @<text>
+        @foreach (var folder in node.Folders)
+        {
+            var open = filter.Trim().Length > 0 || !folded.Contains(folder.Path);
+            <button type="button" class="sh-vaultnav-folder" data-menu-stay style="@Indent(depth)" aria-expanded="@(open ? "true" : "false")" @onclick="() => Fold(folder.Path)">
+                <span class="sh-vaultnav-caret" aria-hidden="true">@(open ? "▾" : "▸")</span>
+                <span class="sh-vaultnav-name">@folder.Name</span>
+            </button>
+            @if (open)
+            {
+                @Branch(folder, depth + 1)
+            }
+        }
+        @foreach (var vault in node.Vaults)
+        {
+            var active = string.Equals(vault.Name, Current, StringComparison.OrdinalIgnoreCase);
+            <a class="sh-admin-link sh-vaultnav-link @(active ? "active" : "")" style="@Indent(depth)" href="@($"/vaults/{vault.Name}")" aria-current="@(active ? "page" : null)" title="@vault.Description">
+                <span class="sh-mono sh-vaultnav-name">@vault.Name</span>
+                <span class="sh-vaultnav-role" title="Your role in this vault">@Short(vault.Role)</span>
+            </a>
+        }
+    </text>;
+
+    /// <summary>A folder in the tree: what is in it, by name.</summary>
+    private sealed record Node(string Name, string Path, List<Node> Folders, List<VaultPlace> Vaults);
+
+    // The folders whose content is hidden, by path: everything is open until someone folds it.
+    private readonly HashSet<string> folded = new(StringComparer.OrdinalIgnoreCase);
+
+    private void Fold(string path)
+    {
+        if (!folded.Remove(path))
+        {
+            folded.Add(path);
+        }
+    }
+
+    private static string Indent(int depth) => depth == 0 ? "" : $"padding-left: {10 + (depth * 14)}px";
+
+    // The vaults by the folders they are in. Only folders on the way to a vault shown here appear: an empty one has
+    // nothing to open, and a folder with no vault of yours is not yours to see.
+    private static Node Tree(IEnumerable<VaultPlace> places)
+    {
+        var root = new Node("", "", [], []);
+        foreach (var place in places)
+        {
+            var node = root;
+            foreach (var name in place.Folders)
+            {
+                var path = node.Path.Length == 0 ? name : $"{node.Path}/{name}";
+                var next = node.Folders.FirstOrDefault(folder => string.Equals(folder.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (next is null)
+                {
+                    next = new Node(name, path, [], []);
+                    node.Folders.Add(next);
+                }
+
+                node = next;
+            }
+
+            node.Vaults.Add(place);
+        }
+
+        Sort(root);
+        return root;
+    }
+
+    private static void Sort(Node node)
+    {
+        node.Folders.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
+        node.Vaults.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
+        node.Folders.ForEach(Sort);
+    }
+
+    // A filter matches a vault's name or a folder it is in.
+    private IEnumerable<VaultPlace> Shown => filter.Trim() is { Length: > 0 } text
+        ? vaults.Where(vault => vault.Name.Contains(text, StringComparison.OrdinalIgnoreCase) || vault.Folders.Any(folder => folder.Contains(text, StringComparison.OrdinalIgnoreCase)))
+        : vaults;
+
+    private bool IsHome => new Uri(Navigation.Uri).AbsolutePath == "/";
+
+    // The vault in the address: /vaults/{name}, and every page under it.
+    private string? Current
+    {
+        get
+        {
+            var path = new Uri(Navigation.Uri).AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            return path.Length >= 2 && path[0] == "vaults" ? Uri.UnescapeDataString(path[1]) : null;
+        }
+    }
+
+    private static string Short(VaultRole role) => role switch
+    {
+        VaultRole.Reader => "Reader",
+        VaultRole.SecretsWriter => "Writer",
+        VaultRole.SecretsUser => "User",
+        VaultRole.SecretsOfficer => "Officer",
+        _ => "Admin",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += Changed;
+        Vaults.VaultsChanged += Refresh;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        try
+        {
+            vaults = await Vaults.Run(service => service.ListMyVaultsAsync(Vaults.Caller));
+        }
+        catch (DomainException)
+        {
+            vaults = [];
+        }
+    }
+
+    // The list is read again when the address names a vault it does not hold: one that was just made or renamed.
+    private async void Changed(object? sender, LocationChangedEventArgs e)
+    {
+        await InvokeAsync(async () =>
+        {
+            if (Current is { } current && !vaults.Any(vault => string.Equals(vault.Name, current, StringComparison.OrdinalIgnoreCase)))
+            {
+                await Reload();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private async void Refresh() => await InvokeAsync(async () =>
+    {
+        await Reload();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= Changed;
+        Vaults.VaultsChanged -= Refresh;
+    }
+}

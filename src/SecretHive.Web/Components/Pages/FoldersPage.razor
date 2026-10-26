@@ -1,0 +1,294 @@
+@page "/admin/folders"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@using SecretHive.Application.Ports
+@inject Vaults Vaults
+@inject NavigationManager Navigation
+
+<PageTitle>Folders · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Folders</h1>
+        <p class="sh-lede">
+            Folders put the vaults in a tree, the same for everyone. A role given on a folder counts in every vault
+            beneath it, at any depth, on top of what the vault gives itself. Moving a vault or a folder changes who
+            reaches it at once; the audit trail says who gained and who lost.
+        </p>
+    </div>
+    <div class="sh-right">
+        <button class="sh-btn sh-btn-primary" @onclick="OpenCreate"><Icon Name="plus" /> New folder</button>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+@if (done is not null)
+{
+    <div class="sh-done" role="status">@done</div>
+}
+
+<div class="sh-card">
+    @if (folders.Count == 0)
+    {
+        <div class="sh-empty">No folders yet. Every vault is at the top.</div>
+    }
+    else
+    {
+        <table class="sh-table">
+            <thead><tr><th>Folder</th><th>Vaults</th><th>Folders</th><th>Description</th></tr></thead>
+            <tbody>
+                @foreach (var folder in folders)
+                {
+                    var chosen = string.Equals(folder.Name, Selected, StringComparison.OrdinalIgnoreCase);
+                    <tr class="@(chosen ? "sh-selected" : "")">
+                        <td>
+                            <span class="sh-folder-indent" style="@($"padding-left: {(folder.Path.Count - 1) * 18}px")">
+                                <a class="sh-mono" href="@($"/admin/folders?folder={Uri.EscapeDataString(folder.Name)}")">@folder.Name</a>
+                            </span>
+                        </td>
+                        <td>@folder.Vaults</td>
+                        <td>@folder.Folders</td>
+                        <td class="sh-muted sh-small">@folder.Description</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (Shown is { } shown)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2 class="sh-mono">@string.Join(" / ", shown.Path)</h2>
+            <div class="sh-right">
+                <button class="sh-btn sh-btn-sm" @onclick="OpenRename">Rename…</button>
+                <button class="sh-btn sh-btn-sm" @onclick="OpenMove">Move…</button>
+                @if (shown.Vaults == 0 && shown.Folders == 0)
+                {
+                    @if (deleting)
+                    {
+                        <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="Delete">Delete, with the roles given on it</button>
+                        <button class="sh-btn sh-btn-sm" @onclick="() => deleting = false">Cancel</button>
+                    }
+                    else
+                    {
+                        <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => deleting = true"><Icon Name="trash" /> Delete…</button>
+                    }
+                }
+            </div>
+        </div>
+        <div class="sh-card-body">
+            <dl class="sh-facts">
+                <dt>Vaults in it</dt>
+                <dd>
+                    @if (vaultsIn.Count == 0)
+                    {
+                        <span class="sh-muted">none</span>
+                    }
+                    @foreach (var vault in vaultsIn)
+                    {
+                        <a class="sh-mono sh-folder-vault" href="@($"/vaults/{vault}")">@vault</a>
+                    }
+                </dd>
+                <dt>Reaches</dt>
+                <dd>@reach vault(s), counting those in the folders beneath it</dd>
+            </dl>
+        </div>
+    </div>
+
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2>Access</h2>
+            <span class="sh-muted sh-small">Roles given here count in every vault beneath this folder. Giving one is a security event.</span>
+        </div>
+        <AccessList Entries="accessList" Users="allUsers" Groups="allGroups" Empty="No role is given on this folder." LinkFolders="true"
+                    OnGive="Assign" OnRemove="Unassign" OnProblem="said => problem = said" />
+    </div>
+}
+
+<Dialog Title="New folder" Open="creating" OnClose="() => creating = false">
+    <Problem Message="@dialogProblem" />
+    <form class="sh-form" @onsubmit="Create">
+        <div class="sh-field">
+            <label class="sh-label" for="folder-name">Name</label>
+            <input id="folder-name" class="sh-input sh-mono" @bind="name" placeholder="oci" />
+            <span class="sh-hint">Letters, digits and hyphens. Unique across all folders.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label" for="folder-parent">In</label>
+            <select id="folder-parent" class="sh-select" @bind="parent">
+                <option value="">(top)</option>
+                @foreach (var folder in folders)
+                {
+                    <option value="@folder.Name">@FolderOptions.Label(folder)</option>
+                }
+            </select>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label" for="folder-description">Description</label>
+            <input id="folder-description" class="sh-input" @bind="description" />
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Create folder</button>
+            <button class="sh-btn" type="button" @onclick="() => creating = false">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+<Dialog Title="Rename folder" Open="renaming" OnClose="() => renaming = false">
+    <Problem Message="@dialogProblem" />
+    <form class="sh-form" @onsubmit="Rename">
+        <div class="sh-field">
+            <label class="sh-label" for="folder-new-name">New name</label>
+            <input id="folder-new-name" class="sh-input sh-mono" @bind="name" placeholder="@Selected" />
+            <span class="sh-hint">The vaults and the roles stay. Nothing outside the server names a folder.</span>
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Rename</button>
+            <button class="sh-btn" type="button" @onclick="() => renaming = false">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+<Dialog Title="Move folder" Open="moving" OnClose="() => moving = false">
+    <Problem Message="@dialogProblem" />
+    <form class="sh-form" @onsubmit="Move">
+        <div class="sh-note" style="margin: 0">
+            What is given on this folder and below it moves along. What changes is what it inherits from above, in
+            every vault beneath it: the audit trail says who gains and who loses.
+        </div>
+        <div class="sh-field">
+            <label class="sh-label" for="folder-move-to">Into</label>
+            <select id="folder-move-to" class="sh-select" @bind="parent">
+                <option value="">(top)</option>
+                @foreach (var folder in folders.Where(folder => !FolderOptions.IsWithin(folder, Selected ?? "")))
+                {
+                    <option value="@folder.Name">@FolderOptions.Label(folder)</option>
+                }
+            </select>
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Move</button>
+            <button class="sh-btn" type="button" @onclick="() => moving = false">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+@code {
+    private IReadOnlyList<FolderSummary> folders = [];
+    private IReadOnlyList<AccessEntry> accessList = [];
+    private IReadOnlyList<SecretHive.Domain.Entities.User> allUsers = [];
+    private IReadOnlyList<SecretHive.Domain.Entities.Group> allGroups = [];
+    private IReadOnlyList<string> vaultsIn = [];
+    private int reach;
+    private string? problem;
+    private string? done;
+    private string? dialogProblem;
+    private bool creating;
+    private bool renaming;
+    private bool moving;
+    private bool deleting;
+    private string name = "";
+    private string parent = "";
+    private string? description;
+
+    /// <summary>The folder shown under the list, by name.</summary>
+    [SupplyParameterFromQuery(Name = "folder")]
+    public string? Selected { get; set; }
+
+    private FolderSummary? Shown => Selected is null ? null : folders.FirstOrDefault(folder => string.Equals(folder.Name, Selected, StringComparison.OrdinalIgnoreCase));
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        deleting = false;
+        try
+        {
+            folders = await Vaults.Run(service => service.ListFoldersAsync(Vaults.Caller));
+            if (Shown is { } shown)
+            {
+                accessList = await Vaults.Run(service => service.ListFolderAccessAsync(shown.Name, Vaults.Caller));
+                allUsers = await Vaults.With<IUserStore, IReadOnlyList<SecretHive.Domain.Entities.User>>(store => store.ListAsync(default));
+                allGroups = await Vaults.With<IAccessStore, IReadOnlyList<SecretHive.Domain.Entities.Group>>(store => store.ListGroupsAsync(default));
+                var vaults = await Vaults.Run(service => service.ListVaultsAsync(Vaults.Caller));
+                vaultsIn = [.. vaults.Where(vault => string.Equals(vault.Folder, shown.Name, StringComparison.OrdinalIgnoreCase)).Select(vault => vault.Name)];
+                var beneath = folders.Where(folder => FolderOptions.IsWithin(folder, shown.Name)).Select(folder => folder.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                reach = vaults.Count(vault => vault.Folder is { } folder && beneath.Contains(folder));
+            }
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    private async Task After(string? said, string? message)
+    {
+        (problem, done) = (said, said is null ? message : null);
+        await Load();
+    }
+
+    private void OpenCreate() => (name, parent, description, dialogProblem, creating) = ("", Selected ?? "", null, null, true);
+
+    private async Task Create()
+    {
+        var made = name.Trim();
+        dialogProblem = await Vaults.Try(service => service.CreateFolderAsync(made, parent.Length == 0 ? null : parent, description, Vaults.Caller));
+        if (dialogProblem is null)
+        {
+            creating = false;
+            done = $"Folder {made} made.";
+            Navigation.NavigateTo($"/admin/folders?folder={Uri.EscapeDataString(made)}");
+        }
+    }
+
+    private void OpenRename() => (name, dialogProblem, renaming) = ("", null, true);
+
+    private async Task Rename()
+    {
+        var to = name.Trim();
+        dialogProblem = await Vaults.Try(service => service.RenameFolderAsync(Selected!, to, Vaults.Caller));
+        if (dialogProblem is null)
+        {
+            renaming = false;
+            done = $"Renamed to {to}.";
+            Navigation.NavigateTo($"/admin/folders?folder={Uri.EscapeDataString(to)}");
+        }
+    }
+
+    private void OpenMove() => (parent, dialogProblem, moving) = (Shown?.Parent ?? "", null, true);
+
+    private async Task Move()
+    {
+        var into = parent.Length == 0 ? null : parent;
+        dialogProblem = await Vaults.Try(service => service.MoveFolderAsync(Selected!, into, Vaults.Caller));
+        if (dialogProblem is null)
+        {
+            moving = false;
+            await After(null, into is null ? "Moved to the top. The audit trail says who gained and who lost." : $"Moved into {into}. The audit trail says who gained and who lost.");
+        }
+    }
+
+    private async Task Delete()
+    {
+        var gone = Selected!;
+        var said = await Vaults.Try(service => service.DeleteFolderAsync(gone, Vaults.Caller));
+        if (said is null)
+        {
+            done = $"Folder {gone} deleted.";
+            Navigation.NavigateTo("/admin/folders");
+        }
+        else
+        {
+            await After(said, null);
+        }
+    }
+
+    private async Task Assign((int? UserKey, int? GroupKey, VaultRole Role) grant) =>
+        await After(await Vaults.Try(service => service.AssignFolderAsync(Selected!, grant.UserKey, grant.GroupKey, grant.Role, Vaults.Caller)), null);
+
+    private async Task Unassign(AccessEntry entry) =>
+        await After(await Vaults.Try(service => service.UnassignFolderAsync(Selected!, entry.UserKey, entry.GroupKey, Vaults.Caller)), null);
+}

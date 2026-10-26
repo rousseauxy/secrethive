@@ -1,0 +1,56 @@
+@using SecretHive.Application.Accounts
+@inject Vaults Vaults
+
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)">
+            <NotAuthorized>
+                <div class="sh-card">
+                    <div class="sh-card-body">
+                        <h2>Not for this account</h2>
+                        <p class="sh-muted" style="margin-bottom: 0">This page needs a role your account does not have. Ask an administrator.</p>
+                    </div>
+                </div>
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+
+@code {
+    [Parameter]
+    public string? Principal { get; set; }
+
+    [Parameter]
+    public string? Address { get; set; }
+
+    [Parameter]
+    public int? UserKey { get; set; }
+
+    [Parameter]
+    public string? Stamp { get; set; }
+
+    [Parameter]
+    public bool IsAdmin { get; set; }
+
+    [Parameter]
+    public bool IsSuperAdmin { get; set; }
+
+    [Parameter]
+    public string? FormTokenName { get; set; }
+
+    [Parameter]
+    public string? FormToken { get; set; }
+
+    protected override void OnInitialized()
+    {
+        var role = IsSuperAdmin ? UserRole.SuperAdmin : IsAdmin ? UserRole.Admin : UserRole.User;
+        Vaults.Caller = new Caller(Principal ?? "unknown", Address, "ui", UserKey, role);
+        Vaults.Stamp = Stamp;
+        Vaults.Actor = UserKey is { } key ? new AccountActor(key, role) : null;
+        Vaults.IsAdmin = IsAdmin;
+        Vaults.IsSuperAdmin = IsSuperAdmin;
+        Vaults.FormTokenName = FormTokenName;
+        Vaults.FormToken = FormToken;
+    }
+}

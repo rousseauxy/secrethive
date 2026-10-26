@@ -1,0 +1,55 @@
+@page "/admin/retention"
+@page "/settings"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@inject Vaults Vaults
+
+<PageTitle>Retention · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div><h1>Retention</h1></div>
+</div>
+
+<Problem Message="@problem" />
+
+<div class="sh-card">
+    <div class="sh-card-header">
+        <h2>Emptying the bins</h2>
+        @if (current is { } currentDays)
+        {
+            <span class="sh-badge sh-badge-warn">on · @currentDays days</span>
+        }
+        else
+        {
+            <span class="sh-badge sh-badge-ok">off</span>
+        }
+    </div>
+    <div class="sh-card-body">
+        <p class="sh-muted" style="margin-top: 0">
+            Off, nothing in a bin is ever removed unless someone purges it. On, whatever has been in a bin longer than
+            the period is destroyed, in every vault, and cannot be restored.
+        </p>
+        <form class="sh-form" @onsubmit:preventDefault>
+            <div class="sh-row">
+                <input class="sh-input" style="width: 120px" type="number" min="1" max="3650" @bind="days" />
+                <span>days</span>
+                <button type="button" class="sh-btn sh-btn-danger" @onclick="() => Save(days)">Switch on</button>
+                <button type="button" class="sh-btn" @onclick="() => Save(null)">Switch off</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@code {
+    private int? current;
+    private int days = 30;
+    private string? problem;
+
+    protected override async Task OnInitializedAsync() => current = await Vaults.Run(service => service.GetRetentionDaysAsync());
+
+    private async Task Save(int? value)
+    {
+        problem = await Vaults.Try(service => service.SetRetentionDaysAsync(value, Vaults.Caller));
+        current = await Vaults.Run(service => service.GetRetentionDaysAsync());
+    }
+}

@@ -1,0 +1,121 @@
+@page "/vaults/{Vault}/bin"
+@layout VaultLayout
+@inject Vaults Vaults
+
+<PageTitle>Bin of @Vault · SecretHive</PageTitle>
+
+<VaultHeader Vault="@Vault" Role="role" CanManage="canManage" Active="bin" />
+
+<p class="sh-lede" style="margin: 0 0 14px">
+    What was deleted from this vault. Nothing here can be read or used; all of it can be restored.
+    @if (retentionDays is { } keepDays)
+    {
+        <span>Emptied automatically after @keepDays days.</span>
+    }
+    else
+    {
+        <span>Never emptied automatically.</span>
+    }
+</p>
+
+<Problem Message="@problem" />
+
+@if (allowed)
+{
+    <div class="sh-card">
+        @if (items.Count == 0)
+        {
+            <div class="sh-empty">The bin of this vault is empty.</div>
+        }
+        else
+        {
+            <table class="sh-table">
+                <thead><tr><th>Name</th><th>Deleted</th><th>By</th><th>Removed on</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var item in items)
+                    {
+                        <tr>
+                            <td class="sh-mono">@item.Name</td>
+                            <td class="sh-muted sh-nowrap">@item.DeletedUtc?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>@item.DeletedBy</td>
+                            <td class="sh-muted sh-nowrap">@(retentionDays is { } afterDays ? item.DeletedUtc?.AddDays(afterDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "never")</td>
+                            <td>
+                                <div class="sh-row">
+                                    <input class="sh-input sh-mono" style="width: 180px" placeholder="restore as…" @bind="restoreNames[item.EntryId]" />
+                                    <button class="sh-btn sh-btn-sm" @onclick="() => Restore(item)"><Icon Name="restore" /> Restore</button>
+                                    @if (role == VaultRole.VaultAdmin)
+                                    {
+                                        @if (purging == item.EntryId)
+                                        {
+                                            <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Purge(item)">Destroy for good</button>
+                                            <button class="sh-btn sh-btn-sm" @onclick="() => purging = null">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => purging = item.EntryId">Purge…</button>
+                                        }
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<SecretSummary> items = [];
+    private readonly Dictionary<Guid, string> restoreNames = [];
+    private VaultRole? role;
+    private bool canManage;
+    private int? retentionDays;
+    private Guid? purging;
+    private bool allowed;
+    private string? problem;
+
+    [Parameter]
+    public string Vault { get; set; } = "";
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        // Nothing from an earlier look stays on the page when this one is refused.
+        items = [];
+        allowed = false;
+        purging = null;
+        try
+        {
+            role = await Vaults.Run(service => service.RoleAsync(Vault, Vaults.Caller));
+            canManage = await Vaults.Run(service => service.CanManageAccessAsync(Vault, Vaults.Caller));
+            items = await Vaults.Run(service => service.ListAsync(Vault, Vaults.Caller, bin: true));
+            retentionDays = await Vaults.Run(service => service.GetRetentionDaysAsync());
+            allowed = true;
+            foreach (var item in items)
+            {
+                restoreNames.TryAdd(item.EntryId, "");
+            }
+        }
+        catch (SecretHive.Domain.DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    private async Task Restore(SecretSummary item)
+    {
+        var name = restoreNames[item.EntryId].Trim();
+        var refused = await Vaults.Try(service => service.RestoreAsync(Vault, item.EntryId, Vaults.Caller, name.Length == 0 ? null : name));
+        await Load();
+        problem = refused ?? problem;
+    }
+
+    private async Task Purge(SecretSummary item)
+    {
+        var refused = await Vaults.Try(service => service.PurgeAsync(Vault, item.EntryId, Vaults.Caller));
+        await Load();
+        problem = refused ?? problem;
+    }
+}

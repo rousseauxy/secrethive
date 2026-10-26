@@ -1,0 +1,20 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+TestResults/
+artifacts/
+
+## Never in this repository: host keys, bundles and environment files
+*.key
+*.pem
+*.bundle
+.env
+.env.*
+
+## OS
+.DS_Store
+Thumbs.db

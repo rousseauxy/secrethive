@@ -1,0 +1,54 @@
+@inject IJSRuntime Js
+
+@* One click to the clipboard. What is copied comes from Text when the button is pressed, so a value is read only
+   then, and that read is on record like any other. A browser that refuses is said so in the button's title. *@
+<button type="button" class="sh-btn sh-btn-icon sh-btn-sm" title="@(said ?? Title)" disabled="@busy" @onclick="CopyIt">
+    <Icon Name="@(copied ? "check" : "copy")" /><span class="sh-sr">@Title</span>
+</button>
+
+@code {
+    private bool copied;
+    private bool busy;
+    private string? said;
+
+    /// <summary>What to copy, or null when there is nothing to copy (the reason is the caller's to show).</summary>
+    [Parameter, EditorRequired]
+    public Func<Task<string?>> Text { get; set; } = default!;
+
+    [Parameter]
+    public string Title { get; set; } = "Copy";
+
+    private async Task CopyIt()
+    {
+        busy = true;
+        said = null;
+        try
+        {
+            if (await Text() is not { } text)
+            {
+                return;
+            }
+
+            try
+            {
+                copied = await Js.InvokeAsync<bool>("secretHive.copy", text);
+            }
+            catch (JSException)
+            {
+                copied = false;
+            }
+
+            said = copied ? null : "The browser did not allow copying.";
+            if (copied)
+            {
+                StateHasChanged();
+                await Task.Delay(1500);
+                copied = false;
+            }
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

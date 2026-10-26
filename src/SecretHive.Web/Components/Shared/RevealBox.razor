@@ -1,0 +1,68 @@
+@inject IJSRuntime Js
+
+@* A value is not on the page, and not in the browser, until someone asks for it. Showing it and copying it are
+   both reads, and both are on record. It stays visible until it is hidden by hand or the page is left. *@
+<div class="sh-secret">
+    @if (shown is null)
+    {
+        <span class="sh-secret-value sh-secret-masked">••••••••••••</span>
+        <button type="button" class="sh-btn sh-btn-icon" title="Show the value. This is a read, and it is on record." @onclick="Show"><Icon Name="eye" /><span class="sh-sr">Reveal</span></button>
+    }
+    else
+    {
+        <span class="sh-secret-value">@shown</span>
+        <button type="button" class="sh-btn sh-btn-icon" title="Hide the value again" @onclick="Hide"><Icon Name="eye-off" /><span class="sh-sr">Hide</span></button>
+    }
+    <button type="button" class="sh-btn sh-btn-icon" title="Copy the value. This is a read, and it is on record." @onclick="Copy"><Icon Name="@(copied ? "check" : "copy")" /><span class="sh-sr">@(copied ? "Copied" : "Copy")</span></button>
+</div>
+<Problem Message="@problem" />
+
+@code {
+    private string? shown;
+    private string? problem;
+    private bool copied;
+
+    /// <summary>Performs the audited read and returns the text.</summary>
+    [Parameter, EditorRequired]
+    public Func<Task<string>> Read { get; set; } = default!;
+
+    private async Task Show() => shown = await ReadOrExplain();
+
+    private void Hide()
+    {
+        shown = null;
+        copied = false;
+    }
+
+    private async Task Copy()
+    {
+        if ((shown ?? await ReadOrExplain()) is { } text)
+        {
+            try
+            {
+                copied = await Js.InvokeAsync<bool>("secretHive.copy", text);
+            }
+            catch (JSException)
+            {
+                copied = false;
+            }
+
+            // A browser may refuse; say so instead of pretending. The read itself already happened and is on record.
+            problem = copied ? null : "The browser did not allow copying. Reveal the value and copy it by hand.";
+        }
+    }
+
+    private async Task<string?> ReadOrExplain()
+    {
+        try
+        {
+            problem = null;
+            return await Read();
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+            return null;
+        }
+    }
+}

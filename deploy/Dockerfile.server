@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+#
+# The SecretHive server. Build from the repository root:  docker build -f deploy/Dockerfile.server -t secrethive .
+#
+# Non-root, works under an arbitrary UID in group 0, listens on 8443 (HTTPS) and 8080, writes only under /data. No shell and no
+# package manager in the final image. The "extra" base carries ICU: the SQL Server client refuses to run without it,
+# and an image that passes every test on SQLite and cannot open a SQL Server connection is a known way to ship broken.
+# The runtime is named to the patch, not left to whatever "10.0" means on the day of the build: the image of 0.17.1
+# came out on 10.0.12 while the tag gives 10.0.13 a few hours later, and the runtime's own copy of a library is what
+# loads (10.0.12 carries System.Security.Cryptography.Pkcs open to CVE-2026-84008). Move this line on purpose, with
+# the packages.
+ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.13-noble-chiseled-extra
+
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
+ARG VERSION=0.0.0-dev
+WORKDIR /src
+
+COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
+COPY src/SecretHive.Domain/SecretHive.Domain.csproj src/SecretHive.Domain/
+COPY src/SecretHive.Application/SecretHive.Application.csproj src/SecretHive.Application/
+COPY src/SecretHive.Infrastructure/SecretHive.Infrastructure.csproj src/SecretHive.Infrastructure/
+COPY src/SecretHive.Infrastructure.Sqlite/SecretHive.Infrastructure.Sqlite.csproj src/SecretHive.Infrastructure.Sqlite/
+COPY src/SecretHive.Infrastructure.SqlServer/SecretHive.Infrastructure.SqlServer.csproj src/SecretHive.Infrastructure.SqlServer/
+COPY src/SecretHive.Api/SecretHive.Api.csproj src/SecretHive.Api/
+COPY src/SecretHive.Web/SecretHive.Web.csproj src/SecretHive.Web/
+RUN dotnet restore src/SecretHive.Web/SecretHive.Web.csproj -a "$TARGETARCH"
+
+COPY src/ src/
+
+# Made here because the runtime image has no shell to make it with. Group 0 and group-writable, so the server can
+# write to it whatever user id it is started with.
+RUN mkdir -p /data-skeleton && chgrp 0 /data-skeleton && chmod 0770 /data-skeleton
+
+# Not --no-restore: with it a publish has been seen to skip composing the static web assets, which gives a healthy
+# container that answers 404 for its own stylesheet. The restore layer above is still reused.
+RUN dotnet publish src/SecretHive.Web/SecretHive.Web.csproj -c Release -a "$TARGETARCH" -o /app -p:UseAppHost=false \
+      -p:Version="$VERSION" -p:InformationalVersion="$VERSION"
+
+# Fail here rather than ship that: nothing would throw, so nothing in a log would say so.
+RUN test -f /app/SecretHive.Web.staticwebassets.endpoints.json && ls /app/wwwroot/app*.css > /dev/null
+
+FROM ${RUNTIME_IMAGE}
+WORKDIR /app
+COPY --from=build /app ./
+COPY --from=build --chown=1654:0 /data-skeleton /data
+
+# 8443 is HTTPS, with your certificate (SecretHive__Tls__CertificateFile and __KeyFile, PEM) or one the server makes
+# for the names in SecretHive__Tls__HostNames. 8080 is plain HTTP: it answers /health and sends the rest to HTTPS.
+ENV SecretHive__DataDirectory=/data \
+    SecretHive__Database__Provider=Sqlite \
+    SecretHive__Database__ConnectionString="Data Source=/data/secrethive.db" \
+    SecretHive__MasterKeyFile=/run/secrets/master.key \
+    SecretHive__Auth__BootstrapAdminTokenFile=/run/secrets/admin.token
+
+EXPOSE 8080 8443
+VOLUME /data
+USER 1654:0
+ENTRYPOINT ["dotnet", "SecretHive.Web.dll"]

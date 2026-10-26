@@ -1,0 +1,67 @@
+@* The audit trail as a table: everything, one vault, or one secret. It names things and never holds a value. *@
+@if (Rows.Count == 0)
+{
+    <div class="sh-empty">Nothing has happened here yet.</div>
+}
+else
+{
+    @* A detail can be one long unbroken word, such as an address: it breaks rather than push the last column out of the card. *@
+    <div class="sh-table-wrap">
+    <table class="sh-table">
+        <thead>
+            <tr>
+                <th>When (UTC)</th>
+                <th>Event</th>
+                <th>Who</th>
+                @if (ShowVault)
+                {
+                    <th>Vault</th>
+                }
+                @if (ShowSecret)
+                {
+                    <th>Secret</th>
+                }
+                <th>What</th>
+                <th>From</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in Rows)
+            {
+                <tr>
+                    <td class="sh-muted sh-nowrap">@row.AtUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</td>
+                    <td class="sh-mono">
+                        @row.Code
+                        @if (row.Severity == AuditSeverity.Security)
+                        {
+                            <span class="sh-badge sh-badge-danger">security</span>
+                        }
+                    </td>
+                    <td>@row.Principal</td>
+                    @if (ShowVault)
+                    {
+                        <td class="sh-mono">@row.Vault</td>
+                    }
+                    @if (ShowSecret)
+                    {
+                        <td class="sh-mono">@row.Secret</td>
+                    }
+                    <td class="sh-mono sh-small sh-break">@row.Slot @row.Detail</td>
+                    <td class="sh-muted sh-small sh-nowrap">@row.Address<br />@row.Via</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<AuditEvent> Rows { get; set; } = [];
+
+    [Parameter]
+    public bool ShowVault { get; set; } = true;
+
+    [Parameter]
+    public bool ShowSecret { get; set; } = true;
+}

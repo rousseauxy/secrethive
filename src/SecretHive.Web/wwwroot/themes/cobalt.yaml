@@ -1,0 +1,96 @@
+# ============================================================================
+# Cobalt — azure and slate, with purple carrying the informational colour.
+#
+# A second pack, written to prove the theming works for more than the built-in
+# look: it changes nothing but tokens, so everything that reads them follows.
+#
+# Contrast is why several hues are not the brand value exactly. A token like
+# `warn` is text on `warn-soft`, and the bright brand amber over a pale tint is
+# around 2:1 — legible as a shape, not as a word. The brand hue stays where it
+# is a background or a dark-mode foreground, and darkens where it has to carry
+# text on light.
+# ============================================================================
+
+name: cobalt
+label: Cobalt and slate
+description: Azure accent on cool paper, slate chrome, purple for information.
+
+fonts:
+  ui: "'Inter', ui-sans-serif, 'Segoe UI', system-ui, sans-serif"
+  mono: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace"
+
+# The name and logo in the top bar. The logo is a file next to this pack, served by SecretHive itself; a
+# data:image/... URL works too. Not a link to another site: the logo would depend on it, and every
+# reader's browser would call it. hideTitle: true drops the name when the logo already carries it.
+branding:
+  titlePlain: SecretHive
+
+layout:
+  radius: 4px
+  radiusLarge: 8px
+  # The widest the content grows; 1440px is the default.
+  pageWidth: 1440px
+
+tokens:
+  light:
+    bg: "#f3f5f7"
+    surface: "#ffffff"
+    inset: "#e9eef2"
+    hover: "#dfe7ed"
+    border: "#dce4ea"
+    border-strong: "#bfcbd4"
+
+    text: "#23333a"
+    text-2: "#55666f"
+    text-3: "#8395a0"
+
+    # The slate the brand uses for its own header, which is what makes this
+    # read as the same family even before the accent appears.
+    chrome: "#23333a"
+    chrome-text: "#e7edf1"
+    chrome-muted: "#9fb0ba"
+
+    accent: "#007db3"
+    accent-strong: "#0071a1"
+    accent-soft: "#e6f5fc"
+    accent-contrast: "#ffffff"
+
+    ok: "#2f8f2a"
+    ok-soft: "#e6f4e5"
+    warn: "#96690a"
+    warn-soft: "#fdf1d9"
+    danger: "#c40d2c"
+    danger-soft: "#fde8eb"
+    # Purple rather than a second blue: `info` sits next to `accent` on the
+    # same row - Cached beside Local - and two blues would read as one.
+    info: "#5a0ec4"
+    info-soft: "#f0e9fc"
+
+  dark:
+    bg: "#131a1e"
+    surface: "#1b2429"
+    inset: "#222d33"
+    hover: "#2a363d"
+    border: "#2f3c43"
+    border-strong: "#425159"
+
+    text: "#e6edf1"
+    text-2: "#a3b3bd"
+    text-3: "#7d8f9a"
+
+    chrome: "#0f1519"
+
+    # The brand's lighter blue, which is the one that survives a dark ground.
+    accent: "#40b6e8"
+    accent-strong: "#6ccbf2"
+    accent-soft: "#10303f"
+    accent-contrast: "#06222e"
+
+    ok: "#6ec96a"
+    ok-soft: "#162a18"
+    warn: "#fab600"
+    warn-soft: "#332708"
+    danger: "#ff6b80"
+    danger-soft: "#3a1218"
+    info: "#a77af0"
+    info-soft: "#231640"

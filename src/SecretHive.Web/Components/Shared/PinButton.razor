@@ -1,0 +1,36 @@
+@inject Vaults Vaults
+
+@* A star that keeps a vault, or a secret in it, on the caller's home page. Only an account has pins; pinning is not
+   on record, because it shows nothing new. *@
+@if (Vaults.Caller.UserKey is not null)
+{
+    <button type="button" class="sh-btn sh-btn-icon sh-btn-sm sh-pin @(Pinned ? "on" : "")" aria-pressed="@(Pinned ? "true" : "false")"
+            title="@(Pinned ? "Unpin from your home page" : "Pin to your home page")" @onclick="Toggle">
+        <Icon Name="@(Pinned ? "star-on" : "star")" /><span class="sh-sr">@(Pinned ? "Unpin" : "Pin") @(Secret ?? Vault)</span>
+    </button>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Vault { get; set; } = "";
+
+    /// <summary>The secret; null pins the vault.</summary>
+    [Parameter]
+    public string? Secret { get; set; }
+
+    [Parameter]
+    public bool Pinned { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> OnChanged { get; set; }
+
+    private async Task Toggle()
+    {
+        var want = !Pinned;
+        if (await Vaults.Try(service => service.SetPinAsync(Vault, Secret, want, Vaults.Caller)) is null)
+        {
+            Pinned = want;
+            await OnChanged.InvokeAsync(want);
+        }
+    }
+}

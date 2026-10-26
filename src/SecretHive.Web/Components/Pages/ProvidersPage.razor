@@ -1,0 +1,315 @@
+@page "/admin/providers"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.SuperAdminRole)]
+@using SecretHive.Application.Accounts
+@using SecretHive.Web.SignIn
+@inject Vaults Vaults
+@inject PublicUrl Urls
+@inject NavigationManager Navigation
+
+<PageTitle>Providers · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Providers</h1>
+        <p class="sh-lede">
+            OpenID Connect providers people sign in with. Saved here and read at each sign-in, so a change needs no
+            restart. An identity is never matched to an existing account by name or email: people connect a provider
+            to their account from their profile, or the provider makes them a new account that holds no role anywhere.
+            A provider can also be trusted for tokens on the API, so a CI job signs in with the identity its platform
+            gives it and no key is stored for it; a CI system is added for that alone, with sign-in off.
+        </p>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+@if (notice is not null)
+{
+    <div class="sh-done" role="status">@notice</div>
+}
+
+@foreach (var provider in providers)
+{
+    var form = forms[provider.Key];
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2>@provider.DisplayName</h2>
+            <span class="sh-muted sh-small sh-mono">@provider.Slug</span>
+            <span class="sh-badge @(provider.Enabled ? "sh-badge-accent" : "")">@(provider.Enabled ? "sign-in on" : "sign-in off")</span>
+            @if (provider.AcceptApiTokens)
+            {
+                <span class="sh-badge sh-badge-accent">API tokens</span>
+            }
+            @if (provider.Enabled && !withSecret.Contains(provider.Key))
+            {
+                <span class="sh-badge sh-badge-danger">client secret missing</span>
+            }
+            <div class="sh-right">
+                <button class="sh-btn sh-btn-sm" @onclick="() => editing = editing == provider.Key ? null : provider.Key">@(editing == provider.Key ? "Close" : "Edit")</button>
+                @if (deleting == provider.Key)
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Delete(provider.Key)">Delete, with every connection to it</button>
+                    <button class="sh-btn sh-btn-sm" @onclick="() => deleting = null">Cancel</button>
+                }
+                else
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => deleting = provider.Key">Delete…</button>
+                }
+            </div>
+        </div>
+        <div class="sh-card-body">
+            <dl class="sh-facts">
+                <dt>Issuer</dt><dd class="sh-mono">@provider.Authority</dd>
+                <dt>Redirect URI</dt><dd class="sh-mono">@RedirectUri(provider.Slug)</dd>
+                <dt>Client</dt><dd>Confidential, authorization code flow with PKCE</dd>
+                <dt>New identities</dt>
+                <dd>
+                    @(provider.CreateAccounts ? "Get a new account with no role in any vault" : "Are refused: an account connects the provider from its profile")
+                    @if (provider.AllowedEmailDomains.Length > 0)
+                    {
+                        <span class="sh-muted"> · only @string.Join(", ", OidcProvider.ParseEmailDomains(provider.AllowedEmailDomains))</span>
+                    }
+                </dd>
+                <dt>Groups</dt><dd>@(provider.GroupsClaim.Length > 0 ? $"From the claim '{provider.GroupsClaim}', for the groups linked on the groups page" : "Not read")</dd>
+                <dt>API tokens</dt>
+                <dd>
+                    @if (provider.AcceptApiTokens)
+                    {
+                        <span>Accepted when signed by this issuer for <span class="sh-mono">@string.Join(" or ", OidcProvider.ParseAudiences(provider.ApiAudiences))</span></span>
+                        @if (provider.ApiRequiredClaims.Length > 0)
+                        {
+                            <span class="sh-muted"> · only with <span class="sh-mono">@provider.ApiRequiredClaims.Replace("\n", ", ")</span></span>
+                        }
+                        @if (provider.GroupsClaim.Length == 0)
+                        {
+                            <span class="sh-badge sh-badge-danger">no groups claim: a token is matched to no group and sees nothing</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="sh-muted">Not accepted</span>
+                    }
+                </dd>
+            </dl>
+            @if (deleting == provider.Key)
+            {
+                <p class="sh-muted" style="margin-bottom: 0">
+                    Accounts stay. One that only ever signed in through this provider has no way in until an
+                    administrator sets it a password. To stop sign-ins for a while, switch the provider off instead.
+                </p>
+            }
+            @if (editing == provider.Key)
+            {
+                <hr class="sh-rule" />
+                <form class="sh-form" @onsubmit="() => Save(provider.Key)">
+                    @Fields(form, true)
+                    <div class="sh-form-actions"><button class="sh-btn sh-btn-primary" type="submit">Save</button></div>
+                </form>
+            }
+        </div>
+    </div>
+}
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>New provider</h2></div>
+    <div class="sh-card-body">
+        <form class="sh-form" @onsubmit="Create">
+            @Fields(fresh, false)
+            <div class="sh-form-actions"><button class="sh-btn sh-btn-primary" type="submit">Add provider</button></div>
+        </form>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<OidcProvider> providers = [];
+    private readonly Dictionary<int, Form> forms = [];
+    private HashSet<int> withSecret = [];
+    private Form fresh = new();
+    private int? editing;
+    private int? deleting;
+    private string? problem;
+    private string? notice;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private string RedirectUri(string slug) => (Urls.BaseUrl ?? Navigation.BaseUri.TrimEnd('/')) + OidcSchemes.CallbackPath(slug);
+
+    private RenderFragment Fields(Form form, bool existing) => @<text>
+        <div class="sh-field">
+            <label class="sh-label">Name on the button</label>
+            <input class="sh-input" @bind="form.DisplayName" placeholder="Authentik" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Slug</label>
+            <input class="sh-input sh-mono" @bind="form.Slug" placeholder="authentik" />
+            <span class="sh-hint">Part of the redirect URI. Changing it later means registering the new URI at the provider.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Issuer</label>
+            <input class="sh-input sh-mono" @bind="form.Authority" placeholder="https://auth.example.org/application/o/secrethive/" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Client id</label>
+            <input class="sh-input sh-mono" @bind="form.ClientId" autocomplete="off" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Client secret</label>
+            <input class="sh-input sh-mono" type="password" @bind="form.ClientSecret" autocomplete="new-password" />
+            <span class="sh-hint">@(existing ? "Leave empty to keep the stored one. It is stored encrypted and never shown again." : "Stored encrypted and never shown again.")</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Scopes</label>
+            <input class="sh-input sh-mono" @bind="form.Scopes" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">User name claim</label>
+            <input class="sh-input sh-mono" @bind="form.UserNameClaim" />
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Groups claim</label>
+            <input class="sh-input sh-mono" @bind="form.GroupsClaim" placeholder="groups" />
+            <span class="sh-hint">Empty: groups are not read, and memberships stay as they are.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Allowed email domains</label>
+            <input class="sh-input sh-mono" @bind="form.AllowedEmailDomains" placeholder="example.org" />
+            <span class="sh-hint">For new identities only, separated by spaces. Empty allows any.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-check"><input type="checkbox" @bind="form.CreateAccounts" /> Make an account for an identity nobody has connected</label>
+            <span class="sh-hint">Such an account holds no role in any vault until someone gives it one.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-check"><input type="checkbox" @bind="form.Enabled" /> Sign-in on</label>
+            <span class="sh-hint">Off for an issuer that is only trusted for tokens, such as a CI system: it then needs no client id or secret.</span>
+        </div>
+        <hr class="sh-rule" />
+        <div class="sh-field">
+            <label class="sh-check"><input type="checkbox" @bind="form.AcceptApiTokens" /> Accept tokens this issuer signs on the API</label>
+            <span class="sh-hint">
+                A job sends its token as <span class="sh-mono">Authorization: Bearer</span>. What it may do comes from the
+                groups linked to the values of the groups claim: for a CI system, set that claim to the one naming the
+                repository or project, and link a group to each repository that may read.
+            </span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Audiences</label>
+            <input class="sh-input sh-mono" @bind="form.ApiAudiences" placeholder="https://secrethive.example.org" />
+            <span class="sh-hint">What a token must be for, separated by spaces. Required: without it any token this issuer signs for anything would do.</span>
+        </div>
+        <div class="sh-field">
+            <label class="sh-label">Required claims</label>
+            <textarea class="sh-textarea" rows="3" @bind="form.ApiRequiredClaims" placeholder="repository_owner=my-organisation"></textarea>
+            <span class="sh-hint">One name=value per line; a token must carry every one. Repeat a name to allow several values. A value ending in * matches every value that starts with the rest: ref=refs/tags/docker-*.</span>
+        </div>
+    </text>;
+
+    private async Task Load()
+    {
+        (providers, withSecret) = await Vaults.With<ProviderService, (IReadOnlyList<OidcProvider>, HashSet<int>)>(async service =>
+        {
+            var list = await service.ListAsync(Vaults.Caller);
+            return (list, list.Where(service.HasSecret).Select(provider => provider.Key).ToHashSet());
+        });
+        forms.Clear();
+        foreach (var provider in providers)
+        {
+            forms[provider.Key] = Form.From(provider);
+        }
+
+        deleting = null;
+    }
+
+    private async Task<bool> Do(Func<ProviderService, Task> act)
+    {
+        try
+        {
+            problem = null;
+            notice = null;
+            await Vaults.With<ProviderService, bool>(async service =>
+            {
+                await act(service);
+                return true;
+            });
+            return true;
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+            return false;
+        }
+    }
+
+    private async Task Create()
+    {
+        var settings = fresh.ToSettings();
+        if (await Do(service => service.CreateAsync(settings, Vaults.Caller)))
+        {
+            notice = $"Provider added. Register {RedirectUri(settings.Slug.Trim())} as its redirect URI at the provider.";
+            fresh = new();
+            await Load();
+        }
+    }
+
+    private async Task Save(int key)
+    {
+        var settings = forms[key].ToSettings();
+        if (await Do(service => service.UpdateAsync(key, settings, Vaults.Caller)))
+        {
+            notice = "Provider saved. The next sign-in uses the change.";
+            editing = null;
+            await Load();
+        }
+    }
+
+    private async Task Delete(int key)
+    {
+        if (await Do(service => service.DeleteAsync(key, Vaults.Caller)))
+        {
+            notice = "Provider deleted, with its connections and group links.";
+        }
+
+        await Load();
+    }
+
+    private sealed class Form
+    {
+        public string DisplayName { get; set; } = "";
+        public string Slug { get; set; } = "";
+        public string Authority { get; set; } = "";
+        public string ClientId { get; set; } = "";
+        public string ClientSecret { get; set; } = "";
+        public string Scopes { get; set; } = OidcProvider.DefaultScopes;
+        public string UserNameClaim { get; set; } = OidcProvider.DefaultUserNameClaim;
+        public string GroupsClaim { get; set; } = "";
+        public string AllowedEmailDomains { get; set; } = "";
+        public bool CreateAccounts { get; set; }
+        public bool Enabled { get; set; } = true;
+        public int Ordinal { get; set; }
+        public bool AcceptApiTokens { get; set; }
+        public string ApiAudiences { get; set; } = "";
+        public string ApiRequiredClaims { get; set; } = "";
+
+        public static Form From(OidcProvider provider) => new()
+        {
+            DisplayName = provider.DisplayName,
+            Slug = provider.Slug,
+            Authority = provider.Authority,
+            ClientId = provider.ClientId,
+            Scopes = provider.Scopes,
+            UserNameClaim = provider.UserNameClaim,
+            GroupsClaim = provider.GroupsClaim,
+            AllowedEmailDomains = provider.AllowedEmailDomains.Replace('\n', ' '),
+            CreateAccounts = provider.CreateAccounts,
+            Enabled = provider.Enabled,
+            Ordinal = provider.Ordinal,
+            AcceptApiTokens = provider.AcceptApiTokens,
+            ApiAudiences = provider.ApiAudiences.Replace('\n', ' '),
+            ApiRequiredClaims = provider.ApiRequiredClaims,
+        };
+
+        public ProviderSettings ToSettings() => new(
+            DisplayName ?? "", Slug ?? "", Authority ?? "", ClientId ?? "", ClientSecret, Scopes ?? "", UserNameClaim ?? "", GroupsClaim ?? "", Enabled, CreateAccounts, AllowedEmailDomains ?? "", Ordinal,
+            AcceptApiTokens, string.Join('\n', (ApiAudiences ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries)), ApiRequiredClaims ?? "");
+    }
+}

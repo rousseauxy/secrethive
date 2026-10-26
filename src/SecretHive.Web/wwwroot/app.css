@@ -1,0 +1,532 @@
+/* ===================================================================
+   SECRETHIVE — DESIGN SYSTEM
+   "Paper & graphite" neutrals, one accent (deep teal), mono for names,
+   versions and ids. The token names are shared with the sibling
+   applications, so a theme pack written for one can be loaded here.
+   =================================================================== */
+
+:root {
+  --font-ui: ui-sans-serif, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --inset: #f3f1ec;
+  --hover: #edeae3;
+  --border: #e6e3db;
+  --border-strong: #cfcac0;
+
+  --text: #26241f;
+  --text-2: #6e6a60;
+  --text-3: #9b968c;
+
+  --chrome: #211e19;
+  --chrome-text: #d9d5cb;
+  --chrome-muted: #8f8a7e;
+  --chrome-hover: rgb(255 255 255 / 0.08);
+  /* The brand and what is pointed at in the top bar; a pack with a light bar makes it dark. */
+  --chrome-strong: #fff;
+
+  --accent: #0f6b6b;
+  --accent-strong: #0b5252;
+  --accent-soft: #e0f0ee;
+  --accent-contrast: #ffffff;
+
+  --ok: #2f7d4f;      --ok-soft: #e3f1e8;
+  --warn: #9a6200;    --warn-soft: #f7ecd6;
+  --danger: #b3261e;  --danger-soft: #f9e5e3;
+
+  --r-1: 6px;
+  --r-2: 10px;
+  --page-width: 1280px;
+  --shadow-1: 0 1px 2px rgb(30 27 20 / 0.06);
+  --shadow-2: 0 8px 28px rgb(30 27 20 / 0.14);
+
+  color-scheme: light;
+}
+
+/*
+  Dark is stated twice, on purpose. The media query answers a reader whose system asks for dark; the attribute is
+  what an explicit choice sets, and it has to win over the system preference, which a single block cannot do.
+*/
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151412;
+    --surface: #1d1b18;
+    --inset: #262320;
+    --hover: #2c2925;
+    --border: #33302a;
+    --border-strong: #45403a;
+
+    --text: #e8e5dd;
+    --text-2: #a39e93;
+    --text-3: #7a756b;
+
+    --chrome: #111009;
+
+    --accent: #5cc4bd;
+    --accent-strong: #86d8d2;
+    --accent-soft: #12302e;
+    --accent-contrast: #06211f;
+
+    --ok: #5cb883;      --ok-soft: #1c2f24;
+    --warn: #dba54b;    --warn-soft: #3a2f1a;
+    --danger: #e5695f;  --danger-soft: #3a201d;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #151412;
+  --surface: #1d1b18;
+  --inset: #262320;
+  --hover: #2c2925;
+  --border: #33302a;
+  --border-strong: #45403a;
+
+  --text: #e8e5dd;
+  --text-2: #a39e93;
+  --text-3: #7a756b;
+
+  --chrome: #111009;
+
+  --accent: #5cc4bd;
+  --accent-strong: #86d8d2;
+  --accent-soft: #12302e;
+  --accent-contrast: #06211f;
+
+  --ok: #5cb883;    --ok-soft: #1c2f24;
+  --warn: #dba54b;  --warn-soft: #3a2f1a;
+  --danger: #e5695f;  --danger-soft: #3a201d;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--font-ui);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-strong); text-decoration: underline; }
+
+h1 { font-size: 22px; margin: 0; font-weight: 650; }
+/* After a page change the title takes focus, so a screen reader reads the new page. It is not a control: no ring. */
+h1:focus { outline: none; }
+h2 { font-size: 15px; margin: 0; font-weight: 650; }
+code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
+
+/* ── Chrome ─────────────────────────────────────────────────────── */
+.sh-topbar { background: var(--chrome); color: var(--chrome-text); }
+.sh-topbar-inner { max-width: var(--page-width); margin: 0 auto; padding: 0 20px; min-height: 48px; display: flex; align-items: center; gap: 4px; }
+.sh-brand { display: flex; align-items: center; gap: 9px; color: var(--chrome-strong); font-weight: 650; margin-right: 16px; white-space: nowrap; }
+.sh-brand:hover { color: var(--chrome-strong); text-decoration: none; }
+.sh-brand-logo { width: 22px; height: 22px; display: block; }
+.sh-nav { display: flex; align-items: center; gap: 2px; }
+.sh-nav a { color: var(--chrome-text); padding: 6px 10px; border-radius: var(--r-1); white-space: nowrap; }
+.sh-nav a:hover { background: var(--chrome-hover); text-decoration: none; }
+.sh-nav a.active { background: var(--chrome-hover); color: var(--chrome-strong); }
+.sh-topbar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+.sh-theme-btn { font: inherit; font-size: 16px; line-height: 1; width: 32px; height: 32px; border-radius: var(--r-1); border: 0; background: transparent; color: var(--chrome-text); cursor: pointer; }
+.sh-theme-btn:hover { background: var(--chrome-hover); color: var(--chrome-strong); }
+
+/* The one door into everything that is not a vault: a <details>, so it opens without any script. */
+.sh-menu { position: relative; }
+.sh-menu > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--r-1); color: var(--chrome-text); white-space: nowrap; }
+.sh-menu > summary::-webkit-details-marker { display: none; }
+.sh-menu > summary:hover, .sh-menu[open] > summary { background: var(--chrome-hover); color: var(--chrome-strong); }
+.sh-menu-caret { font-size: 10px; color: var(--chrome-muted); }
+.sh-menu-panel { position: absolute; right: 0; top: calc(100% + 6px); min-width: 210px; z-index: 20; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-2); padding: 6px; }
+.sh-menu-panel a { display: block; padding: 7px 10px; border-radius: var(--r-1); color: var(--text); }
+.sh-menu-panel a:hover { background: var(--hover); text-decoration: none; }
+.sh-menu-button { display: block; width: 100%; text-align: left; font: inherit; padding: 7px 10px; border: 0; border-radius: var(--r-1); background: transparent; color: var(--text); cursor: pointer; }
+.sh-menu-button:hover { background: var(--hover); }
+.sh-menu-panel hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+.sh-menu-who { padding: 6px 10px 2px; color: var(--text-2); font-size: 12px; }
+.sh-menu-version { padding: 6px 10px 4px; color: var(--text-3); font-size: 12px; font-family: var(--font-mono); }
+
+.sh-main { max-width: var(--page-width); margin: 0 auto; padding: 24px 20px 64px; }
+.sh-page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 18px; }
+/* Centred, not stretched: a role badge beside a button keeps its own height instead of growing into an oval. */
+.sh-page-head .sh-right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+/* Where this page is: every level a link, the page itself last and not one. */
+.sh-crumbs { display: flex; align-items: center; flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; margin: 0 0 6px; color: var(--text-3); }
+.sh-crumbs a { color: var(--text-2); }
+.sh-crumbs a:hover { color: var(--accent-strong); }
+.sh-crumbs > span:last-child { color: var(--text-2); }
+.sh-crumb-sep { color: var(--text-3); margin: 0 6px; }
+.sh-lede { color: var(--text-2); margin: 4px 0 0; }
+
+/* ── Surfaces ───────────────────────────────────────────────────── */
+.sh-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-1); margin-bottom: 18px; }
+.sh-card-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.sh-card-header .sh-right { margin-left: auto; display: flex; gap: 8px; }
+.sh-card-body { padding: 16px; }
+.sh-card-danger { border-color: var(--danger); }
+
+.sh-table { width: 100%; border-collapse: collapse; }
+.sh-table th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; padding: 9px 16px; border-bottom: 1px solid var(--border); }
+.sh-table td { padding: 10px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.sh-table tr:last-child td { border-bottom: 0; }
+.sh-table tbody tr:hover { background: var(--hover); }
+.sh-empty { padding: 28px 16px; text-align: center; color: var(--text-2); }
+
+.sh-facts { display: grid; grid-template-columns: 180px 1fr; gap: 8px 16px; margin: 0; }
+.sh-facts dt { color: var(--text-2); }
+.sh-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+.sh-muted { color: var(--text-2); }
+.sh-faint { color: var(--text-3); }
+.sh-small { font-size: 12px; }
+.sh-nowrap { white-space: nowrap; }
+.sh-table tr.sh-subrow td { padding-top: 0; }
+.sh-table tr:has(+ tr.sh-subrow) td { border-bottom: 0; }
+.sh-break { overflow-wrap: anywhere; min-width: 160px; }
+
+.sh-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--inset); color: var(--text-2); border: 1px solid var(--border); }
+.sh-badge-accent { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
+.sh-badge-warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.sh-badge-danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.sh-badge-ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+
+.sh-alert { padding: 10px 14px; border-radius: var(--r-1); margin-bottom: 16px; background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); }
+.sh-search { margin-bottom: 16px; }
+.sh-search .sh-input { width: 100%; }
+.sh-done { padding: 10px 14px; border-radius: var(--r-1); margin-bottom: 16px; background: var(--accent-soft); color: var(--accent-strong); overflow-wrap: anywhere; }
+.sh-rule { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.sh-or { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 12px; margin: 16px 0 12px; }
+.sh-or::before, .sh-or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.sh-provider { margin-top: 8px; }
+.sh-provider:first-of-type { margin-top: 0; }
+.sh-provider .sh-btn { padding-top: 8px; padding-bottom: 8px; }
+/* The local form, one click away under the providers. */
+.sh-signin-local { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.sh-signin-local > summary { cursor: pointer; color: var(--text-2); font-size: 13px; list-style: none; }
+.sh-signin-local > summary::-webkit-details-marker { display: none; }
+.sh-signin-local > summary::before { content: "▸ "; color: var(--text-3); }
+.sh-signin-local[open] > summary::before { content: "▾ "; }
+.sh-signin-local > summary:hover { color: var(--text); }
+.sh-signin-local[open] > summary { margin-bottom: 12px; }
+.sh-provider .sh-btn { width: 100%; justify-content: center; }
+.sh-provider-row { padding: 6px 0; }
+.sh-note { padding: 10px 14px; border-radius: var(--r-1); margin-bottom: 16px; background: var(--warn-soft); color: var(--warn); }
+
+/* ── Controls ───────────────────────────────────────────────────── */
+.sh-btn { font: inherit; padding: 6px 12px; border-radius: var(--r-1); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+.sh-btn:hover { background: var(--hover); }
+.sh-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.sh-btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.sh-btn-danger { color: var(--danger); border-color: var(--danger); }
+.sh-btn-danger:hover { background: var(--danger-soft); }
+.sh-btn-sm { padding: 2px 8px; font-size: 12px; }
+/* An icon inside a button sits on the text's line and takes its colour. */
+.sh-btn { display: inline-flex; align-items: center; gap: 6px; }
+.sh-icon { flex: 0 0 auto; display: block; }
+.sh-btn-sm .sh-icon { width: 13px; height: 13px; }
+/* A button that is only an icon: square, with what it does in its title and, for a screen reader, in words. */
+.sh-btn-icon { padding: 5px; justify-content: center; }
+.sh-btn-inline { padding: 1px; margin-left: 6px; border-color: transparent; background: transparent; }
+.sh-btn-inline .sh-icon { width: 12px; height: 12px; }
+/* A copy button next to a value in running text. */
+.sh-facts dd .sh-btn-icon, .sh-table td .sh-btn-icon { vertical-align: middle; }
+.sh-table td div > .sh-btn-icon, .sh-facts dd > .sh-btn-icon { margin-left: 6px; padding: 2px; }
+
+/* A description shown on demand: an (i) after the name, its text in the tooltip. Focusable, so the keyboard reaches
+   it too; a tap on a phone shows it. */
+.sh-info { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--text-3); cursor: help; border-radius: 50%; }
+.sh-info:hover, .sh-info:focus-visible { color: var(--accent); }
+.sh-info .sh-icon { width: 14px; height: 14px; }
+
+/* Drawn by app.js from each element's title, as in FiGet. Dark in both themes, like the top bar, so it reads as
+   chrome laid over the page rather than as part of it. */
+.sh-tooltip { position: absolute; z-index: 1100; max-width: 18rem; padding: 5px 9px; background: var(--chrome); color: var(--chrome-text); border: 1px solid var(--chrome-hover); border-radius: var(--r-1); box-shadow: var(--shadow-2); font-family: var(--font-ui); font-size: 12px; line-height: 1.35; text-align: center; pointer-events: none; opacity: 0; transform: translateY(2px); transition: opacity 0.12s ease, transform 0.12s ease; }
+.sh-tooltip.sh-tooltip-on { opacity: 1; transform: none; }
+.sh-tooltip::after { content: ""; position: absolute; left: var(--sh-tooltip-arrow, 50%); top: 100%; width: 8px; height: 8px; background: var(--chrome); transform: translate(-50%, -50%) rotate(45deg); }
+.sh-tooltip-below::after { top: 0; transform: translate(-50%, -50%) rotate(225deg); }
+@media (prefers-reduced-motion: reduce) {
+  .sh-tooltip { transition: none; transform: none; }
+}
+
+/* The actions on one secret: on its page a row of buttons under its name, in the vault's list a few icons per row
+   and the rest behind "more", in a small menu that a click anywhere else, or Escape, closes. */
+.sh-action-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 18px; }
+.sh-actions { white-space: nowrap; text-align: right; width: 1%; }
+.sh-actions > * + * { margin-left: 4px; }
+.sh-rowmenu { position: relative; display: inline-block; vertical-align: top; }
+.sh-rowmenu > summary { list-style: none; cursor: pointer; }
+.sh-rowmenu > summary::-webkit-details-marker { display: none; }
+.sh-rowmenu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-2); text-align: left; white-space: normal; }
+.sh-rowmenu-panel button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-1); background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.sh-rowmenu-panel button:hover, .sh-rowmenu-panel button:focus-visible { background: var(--hover); }
+.sh-rowmenu-panel .sh-rowmenu-danger { color: var(--danger); }
+.sh-rowmenu-panel .sh-rowmenu-danger:hover { background: var(--danger-soft); }
+.sh-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The pages of one thing, as a row of links under its name. */
+/* The active tab's underline sits on the row's own bottom line. Done with an inset shadow, not by letting the links
+   hang one pixel below the row: that pixel made the row scroll vertically, and the browser drew scroll arrows. */
+.sh-tabs { display: flex; gap: 2px; margin: -6px 0 16px; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.sh-tabs::-webkit-scrollbar { display: none; }
+.sh-tabs a { padding: 7px 12px 8px; color: var(--text-2); white-space: nowrap; }
+.sh-tabs a:hover { color: var(--text); text-decoration: none; }
+.sh-tabs a.active { color: var(--accent-strong); box-shadow: inset 0 -2px 0 var(--accent); font-weight: 600; }
+
+/* A card that is closed until asked for. The heading is what is clicked. */
+.sh-fold > summary { list-style: none; cursor: pointer; border-bottom: 0; }
+.sh-fold > summary::-webkit-details-marker { display: none; }
+.sh-fold > summary::after { content: "▸"; margin-left: auto; color: var(--text-3); }
+.sh-fold[open] > summary { border-bottom: 1px solid var(--border); }
+.sh-fold[open] > summary::after { content: "▾"; }
+.sh-pager { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--border); }
+.sh-pager-end { margin-left: auto; }
+
+/* A form over the page (Dialog.razor). */
+.sh-dialog-backdrop { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 0.55); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px 16px; overflow-y: auto; }
+.sh-dialog { width: 100%; max-width: 560px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-2, 0 12px 40px rgb(0 0 0 / 0.4)); }
+.sh-dialog:focus { outline: none; }
+.sh-dialog-wide { max-width: 760px; }
+.sh-dialog-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.sh-dialog-head .sh-btn { margin-left: auto; }
+.sh-dialog-body { padding: 16px; }
+.sh-dialog-body .sh-form { max-width: none; }
+.sh-btn:disabled { opacity: 0.5; cursor: default; }
+
+.sh-form { display: grid; gap: 12px; max-width: 760px; }
+.sh-field { display: grid; gap: 4px; }
+.sh-label { font-weight: 600; font-size: 13px; }
+.sh-hint { color: var(--text-2); font-size: 12px; }
+.sh-input, .sh-select, .sh-textarea { font: inherit; padding: 6px 9px; border-radius: var(--r-1); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); width: 100%; }
+.sh-textarea { font-family: var(--font-mono); font-size: 13px; min-height: 84px; resize: vertical; }
+.sh-input:focus, .sh-select:focus, .sh-textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.sh-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sh-field-row + .sh-field-row { margin-top: 6px; }
+.sh-field-row + .sh-row:not(.sh-field-row) { margin-top: 8px; }
+/* The name of a field whose name is fixed: a label where the other rows have a box, as wide as that box. */
+.sh-field-name { flex: 0 0 150px; color: var(--text-2); padding: 0 2px; }
+
+/* A select's list used to be the one thing the browser drew itself: a system menu beside themed lists. Chromium
+   (135 and later) lets the page paint it, with no script; every other browser ignores this block and keeps its
+   own list, which still works. The keyboard, the form and the value are the native control's either way. */
+@supports (appearance: base-select) {
+  .sh-select, .sh-select::picker(select) { appearance: base-select; }
+  .sh-select { cursor: pointer; align-items: center; }
+  .sh-select::picker-icon { color: var(--text-2); font-size: 10px; margin-left: auto; padding-left: 8px; }
+  .sh-select:open { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .sh-select::picker(select) { margin-top: 4px; min-width: anchor-size(width); max-height: min(22rem, 60vh); padding: 5px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-2, 0 8px 24px rgb(0 0 0 / 0.25)); }
+  .sh-select option { padding: 6px 10px; border-radius: var(--r-1); font-family: var(--font-ui); font-size: 13px; cursor: pointer; }
+  .sh-select option:hover, .sh-select option:focus-visible { background: var(--hover); outline: none; }
+  .sh-select option:checked { color: var(--accent-strong); font-weight: 600; }
+  .sh-select option::checkmark { display: none; }
+}
+
+/* A choice out of many, found by typing (Picker.razor): the suggestion list of the sibling applications.
+   It hangs from the box, with no gap and no top edge, so the two read as one field. */
+.sh-picker { position: relative; min-width: 0; }
+.sh-picker-list { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; max-height: 14rem; overflow-y: auto; margin: 0; padding: 0; list-style: none; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 var(--r-1) var(--r-1); box-shadow: var(--shadow-2, 0 8px 24px rgb(0 0 0 / 0.25)); }
+.sh-picker:has(.sh-picker-list) > .sh-input { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.sh-picker-option { padding: 6px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sh-picker-option.marked { background: var(--hover); }
+/* The name is what is being chosen; what it is, is context. */
+.sh-picker-name { font-weight: 600; }
+.sh-picker-kind { color: var(--text-2); }
+.sh-picker-option.chosen .sh-picker-name { color: var(--accent-strong); }
+.sh-picker-none { padding: 6px 10px; color: var(--text-2); }
+
+/* Choosing a file: the button inside is one of ours, and the box around it is as tall as any other box. */
+.sh-input[type=file] { padding: 4px; color: var(--text-2); cursor: pointer; }
+.sh-input[type=file]::file-selector-button { font: inherit; font-size: 12px; margin-right: 10px; padding: 3px 10px; border-radius: var(--r-1); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+.sh-input[type=file]::file-selector-button:hover { background: var(--hover); }
+.sh-row > .sh-grow { flex: 1 1 160px; min-width: 0; }
+.sh-form-actions { display: flex; gap: 8px; }
+/* A new key: every box under its own name, side by side while there is room and one under the other when not. */
+.sh-keyform { max-width: none; margin-bottom: 16px; }
+.sh-keyform > .sh-row { align-items: flex-end; gap: 12px; }
+.sh-keyform .sh-field { flex: 0 1 200px; }
+.sh-keyform .sh-field.sh-grow { flex: 1 1 220px; }
+.sh-check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* A value is hidden until someone asks for it, and says so. */
+.sh-secret { display: flex; align-items: center; gap: 8px; }
+.sh-secret-value { font-family: var(--font-mono); font-size: 13px; background: var(--inset); border: 1px solid var(--border); border-radius: var(--r-1); padding: 5px 9px; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.sh-secret-masked { color: var(--text-3); letter-spacing: 0.2em; }
+.sh-secret + .sh-alert { margin-top: 10px; }
+.sh-card-body > :last-child { margin-bottom: 0; }
+.sh-table td > a + .sh-badge { margin-left: 6px; }
+
+.sh-signin { max-width: 380px; margin: 12vh auto 0; }
+.sh-list { margin: 8px 0; padding-left: 20px; }
+
+/* ── Admin area ─────────────────────────────────────────────────── */
+/* The same links twice: a column beside the page on a wide screen, a menu that opens from a bar on a narrow one. */
+.sh-admin-shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; align-items: start; }
+.sh-admin-nav { position: sticky; top: 16px; display: grid; gap: 18px; }
+.sh-admin-group { display: grid; gap: 2px; }
+.sh-admin-title { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); padding: 0 10px 4px; }
+.sh-admin-link { display: block; padding: 6px 10px; border-radius: var(--r-1); color: var(--text); }
+.sh-admin-link:hover { background: var(--hover); text-decoration: none; color: var(--text); }
+.sh-admin-link.active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.sh-admin-menu { display: none; margin-bottom: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); }
+.sh-admin-menu > summary { list-style: none; cursor: pointer; padding: 10px 14px; display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.sh-admin-menu > summary::-webkit-details-marker { display: none; }
+.sh-admin-menu-current { color: var(--text-2); font-weight: 400; }
+.sh-admin-menu-caret { margin-left: auto; color: var(--text-3); }
+.sh-admin-menu-panel { padding: 4px 8px 12px; display: grid; gap: 14px; border-top: 1px solid var(--border); }
+.sh-admin-body { min-width: 0; }
+
+/* The pages of a vault: the vaults beside them, the whole width of the screen, a secret's panel beside its list. */
+.sh-main:has(.sh-workspace) { max-width: none; }
+body:has(.sh-workspace) .sh-topbar-inner { max-width: none; }
+.sh-vaultnav .sh-admin-group { gap: 1px; }
+.sh-vaultnav-all { margin-bottom: 4px; }
+.sh-vaultnav-filter { margin: 0 0 8px; padding: 5px 9px; font-size: 13px; }
+.sh-vaultnav-link { display: flex; align-items: baseline; gap: 8px; }
+.sh-vaultnav-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.sh-vaultnav-role { flex: 0 0 auto; font-size: 11px; color: var(--text-3); }
+.sh-vaultnav-none { padding: 4px 10px; }
+/* A folder in the tree: folds what is in it. */
+.sh-vaultnav-folder { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 10px; border: 0; border-radius: var(--r-1); background: transparent; color: var(--text-2); font: inherit; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; text-align: left; cursor: pointer; }
+.sh-vaultnav-folder:hover { background: var(--hover); color: var(--text); }
+.sh-vaultnav-caret { width: 10px; flex: 0 0 auto; color: var(--text-3); font-size: 10px; }
+/* A role inherited from a folder: shown, changed elsewhere. */
+.sh-table tr.sh-inherited > td { color: var(--text-2); }
+.sh-folder-vault + .sh-folder-vault { margin-left: 10px; }
+
+.sh-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.sh-split-list { min-width: 0; }
+.sh-split.has-panel { grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); }
+/* Beside a panel the list drops what the panel shows. */
+.sh-split.has-panel .sh-col-extra { display: none; }
+.sh-table tr.sh-selected > td { background: var(--accent-soft); }
+
+.sh-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-1); }
+.sh-panel-head { display: flex; align-items: flex-start; gap: 6px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.sh-panel-title { flex: 1 1 auto; min-width: 0; }
+.sh-panel-title h2 { margin: 0 0 6px; font-size: 16px; overflow-wrap: anywhere; }
+.sh-panel-title .sh-title-row { margin-bottom: 6px; }
+.sh-panel-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.sh-panel-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.sh-panel > .sh-alert { margin: 12px 16px 0; }
+.sh-panel-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.sh-panel-section:last-child { border-bottom: 0; }
+.sh-panel-section h3 { margin: 0 0 10px; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); }
+.sh-panel .sh-facts { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+.sh-panel .sh-facts dd { margin-bottom: 8px; }
+.sh-panel .sh-parts { margin-top: 10px; }
+.sh-panel .sh-parts th, .sh-panel .sh-parts td { padding: 6px 4px; }
+.sh-panel-note { margin: 8px 0 0; }
+.sh-panel-activity { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.sh-panel-activity li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 13px; }
+
+/* The home page: short lists in cards, the folders side by side where they fit. */
+.sh-home-list { list-style: none; margin: 0; padding: 6px 0; }
+.sh-home-list li { display: flex; align-items: center; gap: 8px; padding: 6px 16px; min-width: 0; }
+.sh-home-list li + li { border-top: 1px solid var(--border); }
+.sh-home-name { min-width: 0; overflow-wrap: anywhere; }
+.sh-home-meta { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.sh-home-count { min-width: 2ch; text-align: right; }
+.sh-home-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 0 18px; align-items: start; }
+.sh-home-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--warn); }
+.sh-home-danger .sh-home-dot { background: var(--danger); }
+.sh-home-attention { border-color: var(--warn); }
+/* The bar shown while the page's connection to the server is down. Hidden unless the framework says otherwise. */
+.sh-reconnect { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 2000; align-items: center; justify-content: center; gap: 10px; padding: 8px 16px; background: var(--chrome); color: var(--chrome-text); font-size: 13px; box-shadow: var(--shadow-2); }
+.sh-reconnect > span { display: none; align-items: center; gap: 10px; }
+.sh-reconnect.components-reconnect-show, .sh-reconnect.components-reconnect-retrying, .sh-reconnect.components-reconnect-paused,
+.sh-reconnect.components-reconnect-failed, .sh-reconnect.components-reconnect-resume-failed, .sh-reconnect.components-reconnect-rejected { display: flex; }
+.sh-reconnect.components-reconnect-show .sh-reconnect-busy, .sh-reconnect.components-reconnect-retrying .sh-reconnect-busy, .sh-reconnect.components-reconnect-paused .sh-reconnect-busy,
+.sh-reconnect.components-reconnect-failed .sh-reconnect-lost, .sh-reconnect.components-reconnect-resume-failed .sh-reconnect-lost,
+.sh-reconnect.components-reconnect-rejected .sh-reconnect-gone { display: inline-flex; }
+.sh-reconnect .sh-btn { color: var(--chrome-text); border-color: var(--chrome-muted); background: transparent; }
+
+/* Under a value field: make a random one. */
+.sh-generate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 8px; }
+.sh-generate-length { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
+.sh-generate-length input { width: 76px; padding: 3px 8px; }
+.sh-generate .sh-check { margin: 0; }
+/* A title with its pin beside it. */
+.sh-title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.sh-title-row > h1, .sh-title-row > h2 { margin-bottom: 0; min-width: 0; overflow-wrap: anywhere; }
+/* A pin: an outline star, filled once pinned. */
+.sh-pin { border-color: transparent; background: transparent; color: var(--text-3); }
+.sh-pin:hover { color: var(--accent); }
+.sh-pin.on { color: var(--warn); }
+
+/* Where list and panel do not both fit, the panel takes the list's place until it is closed. */
+@media (max-width: 1100px) {
+  .sh-split.has-panel { grid-template-columns: minmax(0, 1fr); }
+  .sh-split.has-panel .sh-split-list { display: none; }
+  .sh-panel { position: static; max-height: none; }
+}
+@media (min-width: 1101px) and (max-width: 1500px) {
+  .sh-split.has-panel .sh-col-fields { display: none; }
+}
+
+.sh-table-wrap { overflow-x: auto; }
+
+/* ── Narrow screens ─────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .sh-topbar-inner { padding: 0 12px; }
+  .sh-brand { margin-right: 6px; }
+  .sh-main { padding: 16px 12px 48px; }
+  .sh-page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .sh-page-head .sh-right { margin-left: 0; flex-wrap: wrap; flex-shrink: 1; }
+  h1 { font-size: 19px; overflow-wrap: anywhere; }
+
+  .sh-admin-shell { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .sh-admin-nav { display: none; }
+  .sh-admin-menu { display: block; }
+
+  .sh-page-head .sh-right { align-items: center; gap: 8px; justify-content: flex-start; }
+  .sh-field-name { flex: 1 1 100%; }
+  .sh-keyform .sh-field, .sh-keyform .sh-field.sh-grow { flex: 1 1 100%; }
+  .sh-dialog-backdrop { padding: 12px 8px; }
+  .sh-tabs { margin-top: 0; }
+  /* Beside a role badge a full-size button reads as the main thing on the page; here it is not. */
+  .sh-page-head .sh-right .sh-btn { padding: 2px 10px; font-size: 13px; }
+
+  /* A table becomes a list: one block per row, the first cell as its title and every other cell on a line of
+     its own with the column's name before it (put there by app.js as data-label). Nothing scrolls sideways and
+     no column is cut off. */
+  .sh-card { overflow-x: auto; }
+  .sh-table, .sh-table tbody { display: block; width: 100%; }
+  .sh-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .sh-table tr { display: block; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .sh-table tr:last-child { border-bottom: 0; }
+  .sh-table td, .sh-table th { padding: 0; }
+  .sh-table td { display: flex; gap: 10px; align-items: baseline; padding: 2px 0; border: 0; min-width: 0; overflow-wrap: anywhere; }
+  .sh-table td[data-label]:not([data-label=""])::before { content: attr(data-label); flex: 0 0 82px; color: var(--text-3); font-family: var(--font-ui); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .sh-table td:first-child { display: block; padding-bottom: 6px; }
+  .sh-table td:first-child .sh-small { margin-top: 2px; }
+  .sh-table td:first-child::before { display: none; }
+  .sh-table td.sh-cell-empty { display: none; }
+  .sh-table td[colspan] { display: block; }
+  .sh-table tr.sh-subrow { padding-top: 0; }
+  .sh-table tr:has(+ tr.sh-subrow) { border-bottom: 0; padding-bottom: 2px; }
+  .sh-table .sh-nowrap { white-space: normal; }
+  .sh-break { min-width: 0; }
+  .sh-card-header { flex-wrap: wrap; }
+  .sh-card-body { padding: 12px; }
+  .sh-facts { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .sh-facts dd { margin-bottom: 8px; }
+  .sh-form { max-width: none; }
+  .sh-row > .sh-grow { flex: 1 1 100%; }
+  .sh-select[style] { width: 100% !important; }
+  .sh-secret { flex-wrap: wrap; }
+  .sh-secret-value { flex: 1 1 100%; }
+  .sh-form-actions { flex-wrap: wrap; }
+  .sh-home-folders { grid-template-columns: minmax(0, 1fr); }
+  .sh-home-list li { padding: 8px 12px; }
+  /* On a phone the menu is a sheet at the bottom of the screen: a table cell is too narrow to hang it from. */
+  .sh-table td.sh-actions { justify-content: flex-start; text-align: left; width: auto; }
+  .sh-rowmenu-panel { position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto; min-width: 0; }
+  .sh-rowmenu-panel button { padding: 12px; font-size: 15px; }
+  .sh-action-bar .sh-btn { padding: 4px 10px; font-size: 13px; }
+  .sh-menu-panel { position: fixed; left: 12px; right: 12px; top: 54px; }
+}

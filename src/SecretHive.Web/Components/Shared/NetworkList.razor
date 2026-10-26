@@ -1,0 +1,79 @@
+@*
+    The networks a vault or a key may be used from: network groups by name and literal ranges. An empty list means
+    "from anywhere". The same list, with the same wording, wherever something can be limited to a network.
+*@
+@using SecretHive.Application.Accounts
+
+@if (Lines.Count == 0)
+{
+    <span class="sh-muted sh-small">@Anywhere</span>
+}
+else
+{
+    @foreach (var line in Lines)
+    {
+        <span class="sh-badge" title="@string.Join(", ", line.Ranges)">
+            @if (line.GroupKey is not null)
+            {
+                <span>@line.Label</span>
+                <span class="sh-muted"> · @(line.Ranges.Count == 0 ? "no ranges: allows nothing" : line.Ranges.Count == 1 ? line.Ranges[0] : line.Ranges.Count + " ranges")</span>
+            }
+            else
+            {
+                <span class="sh-mono">@line.Label</span>
+            }
+            <button class="sh-btn sh-btn-icon sh-btn-inline" title="Take this network off the list" @onclick="() => OnRemove.InvokeAsync(line.Key)"><Icon Name="close" /><span class="sh-sr">×</span></button>
+        </span>
+    }
+}
+<div class="sh-row" style="margin-top: 8px">
+    @if (Groups.Count > 0)
+    {
+        <select class="sh-select" style="width: 180px" @bind="group">
+            <option value="0">a network group…</option>
+            @foreach (var option in Groups.Where(option => Lines.All(line => line.GroupKey != option.Key)))
+            {
+                <option value="@option.Key">@option.Name</option>
+            }
+        </select>
+        <span class="sh-muted sh-small">or</span>
+    }
+    <input class="sh-input sh-mono" style="width: 190px" placeholder="192.168.10.0/24" @bind="range" />
+    <button class="sh-btn sh-btn-sm" @onclick="Add">Allow</button>
+</div>
+
+@code {
+    private int group;
+    private string range = "";
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<NetworkLine> Lines { get; set; } = [];
+
+    /// <summary>The network groups that exist, to choose from.</summary>
+    [Parameter]
+    public IReadOnlyList<(int Key, string Name)> Groups { get; set; } = [];
+
+    /// <summary>What an empty list means here, in words.</summary>
+    [Parameter]
+    public string Anywhere { get; set; } = "Not limited: used from any address.";
+
+    /// <summary>A group key, or a range, to add. One of the two is set.</summary>
+    [Parameter]
+    public EventCallback<(int? GroupKey, string? Range)> OnAdd { get; set; }
+
+    [Parameter]
+    public EventCallback<int> OnRemove { get; set; }
+
+    private async Task Add()
+    {
+        var (chosen, typed) = (group, range.Trim());
+        if (chosen == 0 && typed.Length == 0)
+        {
+            return;
+        }
+
+        group = 0;
+        range = "";
+        await OnAdd.InvokeAsync((chosen == 0 ? null : chosen, typed.Length == 0 ? null : typed));
+    }
+}

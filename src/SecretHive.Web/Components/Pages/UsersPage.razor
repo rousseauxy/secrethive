@@ -1,0 +1,221 @@
+@page "/admin/users"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@using SecretHive.Application.Accounts
+@using SecretHive.Application.Ports
+@inject Vaults Vaults
+
+<PageTitle>Users · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Users</h1>
+        <p class="sh-lede">Accounts that can sign in. An admin manages users; a super admin manages admins too.</p>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+@if (notice is not null)
+{
+    <div class="sh-note">@notice</div>
+}
+
+<div class="sh-card">
+    <table class="sh-table">
+        <thead><tr><th>User name</th><th>Name</th><th>Role</th><th>State</th><th>Last sign-in</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var user in users)
+            {
+                var manageable = Vaults.Actor is { } actor && user.Key != actor.Key && AccountService.CanManage(actor, user.Role);
+                <tr>
+                    <td class="sh-mono">@user.UserName</td>
+                    <td>@user.DisplayName <div class="sh-muted sh-small">@user.Email</div></td>
+                    <td>
+                        @if (manageable)
+                        {
+                            <select class="sh-select" style="width: 140px" value="@user.Role" @onchange="e => SetRole(user, Enum.Parse<UserRole>((string)e.Value!))">
+                                @foreach (var role in Enum.GetValues<UserRole>().Where(role => AccountService.CanManage(Vaults.Actor!, role)))
+                                {
+                                    <option value="@role">@ProfilePage.RoleName(role)</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <span class="sh-badge">@ProfilePage.RoleName(user.Role)</span>
+                        }
+                    </td>
+                    <td>
+                        @if (user.IsDisabled)
+                        {
+                            <span class="sh-badge sh-badge-danger">disabled</span>
+                        }
+                        else if (user.LockedUntilUtc > DateTime.UtcNow)
+                        {
+                            <span class="sh-badge sh-badge-warn">locked</span>
+                        }
+                        else if (user.MustChangePassword)
+                        {
+                            <span class="sh-badge sh-badge-warn">must change password</span>
+                        }
+                        else
+                        {
+                            <span class="sh-badge sh-badge-ok">active</span>
+                        }
+                    </td>
+                    <td class="sh-muted sh-nowrap">@(user.LastSignInUtc?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "never")</td>
+                    <td>
+                        @if (manageable)
+                        {
+                            <div class="sh-row">
+                                <button class="sh-btn sh-btn-sm" @onclick="() => resetting = resetting == user.Key ? null : user.Key">Reset password</button>
+                                <button class="sh-btn sh-btn-sm" @onclick="() => SetDisabled(user, !user.IsDisabled)">@(user.IsDisabled ? "Enable" : "Disable")</button>
+                                @if (deleting == user.Key)
+                                {
+                                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Delete(user)">Delete for good</button>
+                                    <button class="sh-btn sh-btn-sm" @onclick="() => deleting = null">Cancel</button>
+                                }
+                                else
+                                {
+                                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => deleting = user.Key">Delete…</button>
+                                }
+                            </div>
+                            @if (resetting == user.Key)
+                            {
+                                <div class="sh-row" style="margin-top: 8px">
+                                    <input class="sh-input" style="width: 240px" type="password" autocomplete="new-password" placeholder="temporary password" @bind="resetPassword" />
+                                    <button class="sh-btn sh-btn-sm sh-btn-primary" @onclick="() => Reset(user)">Set</button>
+                                </div>
+                            }
+                        }
+                        else if (Vaults.Actor?.Key == user.Key)
+                        {
+                            <span class="sh-muted sh-small">you</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>New user</h2></div>
+    <div class="sh-card-body">
+        <form class="sh-form" @onsubmit="Create">
+            <div class="sh-field">
+                <label class="sh-label">User name</label>
+                <input class="sh-input sh-mono" @bind="userName" autocomplete="off" />
+                <span class="sh-hint">Letters, digits and . _ - @@, so an email address works.</span>
+            </div>
+            <div class="sh-row">
+                <div class="sh-field sh-grow"><label class="sh-label">Display name</label><input class="sh-input" @bind="displayName" /></div>
+                <div class="sh-field sh-grow"><label class="sh-label">Email</label><input class="sh-input" type="email" @bind="email" /></div>
+            </div>
+            <div class="sh-field">
+                <label class="sh-label">Role</label>
+                <select class="sh-select" style="width: 200px" @bind="role">
+                    @foreach (var option in Enum.GetValues<UserRole>().Where(option => Vaults.Actor is { } actor && AccountService.CanManage(actor, option)))
+                    {
+                        <option value="@option">@ProfilePage.RoleName(option)</option>
+                    }
+                </select>
+                <span class="sh-hint">A role says what someone may manage. What they may read comes from roles on a vault.</span>
+            </div>
+            <div class="sh-field">
+                <label class="sh-label">First password</label>
+                <input class="sh-input" type="password" autocomplete="new-password" @bind="password" />
+                <span class="sh-hint">At least @AccountService.MinimumPasswordLength characters. They must choose their own at their first sign-in.</span>
+            </div>
+            <div class="sh-form-actions"><button class="sh-btn sh-btn-primary" type="submit">Create user</button></div>
+        </form>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<User> users = [];
+    private string? problem;
+    private string? notice;
+    private int? resetting;
+    private int? deleting;
+    private string resetPassword = "";
+
+    private string userName = "";
+    private string displayName = "";
+    private string email = "";
+    private UserRole role = UserRole.User;
+    private string password = "";
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        // People only. Machines are on the tokens page.
+        users = [.. (await Vaults.With<IUserStore, IReadOnlyList<User>>(store => store.ListAsync(default))).Where(user => !user.IsService)];
+        resetting = null;
+        deleting = null;
+        resetPassword = "";
+    }
+
+    private async Task Do(Func<AccountService, Task<AccountOutcome>> act, string code, string subject, AuditSeverity severity = AuditSeverity.Info)
+    {
+        notice = null;
+        var outcome = await Vaults.With(act);
+        problem = outcome switch
+        {
+            AccountOutcome.Done => null,
+            AccountOutcome.Forbidden => "Your role does not reach that account, or it is your own.",
+            AccountOutcome.NameTaken => "That user name is taken.",
+            AccountOutcome.InvalidName => "That is not a user name: letters, digits and . _ - @ only, starting with a letter or a digit.",
+            AccountOutcome.PasswordTooShort => $"A password is at least {AccountService.MinimumPasswordLength} characters.",
+            AccountOutcome.LastSuperAdmin => "That would leave no super admin who can sign in.",
+            _ => "That account no longer exists.",
+        };
+        if (problem is null)
+        {
+            await Vaults.Audit(code, subject, severity);
+        }
+
+        await Load();
+    }
+
+    private async Task Create()
+    {
+        var created = userName.Trim();
+        await Do(
+            async accounts => (await accounts.CreateAsync(Vaults.Actor!, userName, displayName, email, role, password, default)).Outcome,
+            "user.created",
+            $"{created} role={ProfilePage.RoleName(role)}",
+            role >= UserRole.Admin ? AuditSeverity.Security : AuditSeverity.Info);
+        if (problem is null)
+        {
+            notice = $"{created} can sign in with that password and has to choose a new one.";
+            userName = displayName = email = password = "";
+            role = UserRole.User;
+        }
+    }
+
+    private Task SetRole(User user, UserRole newRole) => Do(
+        accounts => accounts.SetRoleAsync(Vaults.Actor!, user.Key, newRole, default),
+        "user.role.changed",
+        $"{user.UserName} {ProfilePage.RoleName(user.Role)} -> {ProfilePage.RoleName(newRole)}",
+        newRole >= UserRole.Admin ? AuditSeverity.Security : AuditSeverity.Notice);
+
+    private Task SetDisabled(User user, bool disabled) => Do(
+        accounts => accounts.SetDisabledAsync(Vaults.Actor!, user.Key, disabled, default),
+        disabled ? "user.disabled" : "user.enabled",
+        user.UserName,
+        AuditSeverity.Notice);
+
+    private Task Reset(User user) => Do(
+        accounts => accounts.ResetPasswordAsync(Vaults.Actor!, user.Key, resetPassword, default),
+        "user.password.reset",
+        user.UserName,
+        AuditSeverity.Security);
+
+    private Task Delete(User user) => Do(
+        accounts => accounts.DeleteAsync(Vaults.Actor!, user.Key, default),
+        "user.deleted",
+        user.UserName,
+        AuditSeverity.Notice);
+}

@@ -1,0 +1,592 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs inside the SDK image because that makes the job root: the tests that prove ownership, modes and the
+  # atomic rename need it and are skipped otherwise - and a skipped test proves nothing, so a skip fails the job.
+  # SQL Server runs beside it for the same reason: both databases, or it is not done.
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: mcr.microsoft.com/dotnet/sdk:10.0
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          # Throwaway password for a service container that lives only for this job.
+          MSSQL_SA_PASSWORD: "SecretHive_ci_Passw0rd!"
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'SecretHive_ci_Passw0rd!' -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      SECRETHIVE_TEST_SQLSERVER: "Server=mssql,1433;User Id=sa;Password=SecretHive_ci_Passw0rd!;TrustServerCertificate=True"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Test, as root, with nothing skipped
+        shell: bash
+        run: |
+          set -o pipefail
+          test "$(id -u)" = 0
+          dotnet test --no-build --configuration Release | tee test.log
+          grep -Eq 'skipped: +0' test.log
+
+  # The image is what ships, so the image is what gets exercised: a real render onto a real filesystem,
+  # checked from outside the container.
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          tags: secrethive:ci
+
+      - name: Render a stack with the image and inspect the result on the host
+        run: |
+          set -eu
+          mkdir -p work/compose/shop work/appdata/shop
+          cat > work/compose/secrethive.host.yml <<'YAML'
+          version: 1
+          host: ci
+          appdata: /work/appdata
+          bundle_key: /work/host.key
+          providers: [bundle]
+          YAML
+          cat > work/compose/shop/secrethive.yml <<'YAML'
+          version: 1
+          stack: shop
+          vault: shop-ci
+          targets:
+            app:
+              path: ${appdata}/shop/secrets
+              owner: "999:999"
+              restart: [shop]
+              keys:
+                Api__Token: api-token
+          YAML
+          hive() { docker run --rm -i --user 0 -v "$PWD/work:/work" -w /work/compose secrethive:ci "$@"; }
+
+          hive host keygen --host ci
+          printf '%s' 'generated-token' | hive bundle set shop api-token --host ci
+          # A trailing newline is the classic broken deploy; it has to be refused, not stored.
+          if echo 'generated-token' | hive bundle set shop api-token --host ci; then echo "a trailing newline was accepted"; exit 1; fi
+
+          # No pipe here: the exit code that matters is the command's, not tee's.
+          rc=0; hive render shop --host ci > render.log || rc=$?
+          cat render.log
+          test "$rc" = 10
+          grep -q '^restart  shop$' render.log
+          hive render shop --host ci
+          # status inspects the containers it names, and this image has no container runtime: it must say so.
+          if hive status shop --host ci 2> status.err; then echo "status passed without looking at the containers"; exit 1; fi
+          grep -q "could not be started" status.err
+
+          file=work/appdata/shop/secrets/Api__Token
+          test "$(sudo stat -c '%u:%g %a' "$file")" = "999:999 400"
+          test "$(sudo stat -c '%u:%g %a' work/appdata/shop/secrets)" = "999:999 500"
+          test "$(sudo cat "$file" | wc -c)" = 15
+          test "$(sudo cat "$file")" = "generated-token"
+          test "$(sudo ls -A work/appdata/shop)" = "secrets"
+          ! grep -R "generated-token" render.log work/compose
+
+  # The server image, started the way it ships: as an arbitrary user, with its key and its sign-in as files, first on
+  # SQLite and then against SQL Server. A green test suite says nothing about the image; this does.
+  # The pages in a real browser, against the image as it ships: signing in, a secret made, revealed and copied from
+  # the panel, both reads on record, the pages on a phone. Fails on anything the browser complains about, a
+  # Content-Security-Policy report first of all, and when the page connection is not a WebSocket.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.server
+          push: false
+          load: true
+          tags: secrethive-server:ci
+
+      - name: Start it with a throwaway key and sign-in
+        run: |
+          set -eu
+          mkdir -p secrets data shots
+          openssl rand -base64 32 > secrets/master.key
+          printf '%s' "generated-$(openssl rand -hex 24)" > secrets/admin.token
+          chmod 0444 secrets/*
+          chmod 0777 data
+          docker run -d --name hive --user 1000123456:0 -p 8443:8443 -p 8080:8080 -e SecretHive__Tls__HostNames=localhost \
+            -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/data:/data" secrethive-server:ci
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8080/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/health
+
+      - name: Walk through the pages in headless Chrome
+        run: node tests/browser/smoke.mjs https://localhost:8443 secrets/admin.token shots
+
+      - name: The server's log, when it failed
+        if: failure()
+        run: docker logs hive 2>&1 | tail -100
+
+      - name: Screenshots, when it failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-screenshots
+          path: shots/
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.server
+          push: false
+          load: true
+          tags: secrethive-server:ci
+
+      - name: Build the command line's image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          tags: secrethive:ci
+
+      - name: A key and a sign-in for the test, as files
+        run: |
+          mkdir -p secrets data
+          openssl rand -base64 32 > secrets/master.key
+          printf '%s' "ci-$(openssl rand -hex 24)" > secrets/admin.token
+          chmod 0444 secrets/*
+          chmod 0777 data
+
+      - name: The image refuses to start without its master key
+        run: |
+          if docker run --rm --user 1000123456:0 secrethive-server:ci > refuse.log 2>&1; then echo "it started without a key"; exit 1; fi
+          grep -qi "master key" refuse.log
+
+      - name: Start as an arbitrary UID on SQLite and use it
+        run: |
+          set -eu
+          # Host names given, as a deployment gives them: without, the certificate is for the container's own random name.
+          docker run -d --name hive --user 1000123456:0 -p 8080:8080 -p 8443:8443 -e SecretHive__Tls__HostNames=localhost \
+            -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/data:/data" secrethive-server:ci
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8080/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/health
+          auth="Authorization: Bearer $(cat secrets/admin.token)"
+          json="Content-Type: application/json"
+
+          # Plain HTTP answers the health probe and nothing else: every other address is sent to HTTPS.
+          test "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost:8080/api/v1/vaults)" = "302 https://localhost:8443/api/v1/vaults"
+          # The certificate is one the server made for itself, for the names it was given.
+          echo | openssl s_client -connect localhost:8443 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName | tee cert.txt
+          grep -q "DNS:localhost" cert.txt
+          echo | openssl s_client -connect localhost:8443 2>/dev/null | openssl x509 -noout -fingerprint -sha256 > fingerprint.before
+          test "$(curl -ks -o /dev/null -w '%{http_code}' https://localhost:8443/api/v1/vaults)" = 401
+          curl -kfsS -X PUT -H "$auth" -H "$json" -d '{}' https://localhost:8443/api/v1/vaults/ci
+          curl -kfsS -X PUT -H "$auth" -H "$json" -d '{"value":"generated-ci-value","fields":[{"name":"owner","value":"ci"}]}' \
+            https://localhost:8443/api/v1/vaults/ci/secrets/token
+          curl -kfsS -H "$auth" https://localhost:8443/api/v1/vaults/ci/secrets/token/value | grep -q '"value":"generated-ci-value"'
+          curl -kfsS -H "$auth" https://localhost:8443/api/v1/audit | grep -q 'secret.value.read'
+
+          # The pages: the sign-in form, and the stylesheet it asks for under the name it asks for it.
+          curl -kfsS https://localhost:8443/login > login.html
+          grep -q 'Sign in to SecretHive' login.html
+          css=$(grep -o 'href="[^"]*app[^"]*\.css"' login.html | head -1 | cut -d'"' -f2)
+          curl -kfsS "https://localhost:8443/$css" | grep -q -- '--accent'
+          test "$(curl -ks -o /dev/null -w '%{http_code}' https://localhost:8443/)" = 302
+
+          # The session cookie may only ever travel over HTTPS.
+          token=$(grep -o 'name="__RequestVerificationToken" value="[^"]*"' login.html | cut -d'"' -f4)
+          curl -ks -c jar -b jar -o /dev/null https://localhost:8443/login
+          token=$(curl -ks -c jar -b jar https://localhost:8443/login | grep -o 'name="__RequestVerificationToken" value="[^"]*"' | cut -d'"' -f4)
+          curl -ks -c jar -b jar -D headers.txt -o /dev/null --data-urlencode "_handler=signin" --data-urlencode "__RequestVerificationToken=$token" \
+            --data-urlencode "UserName=admin" --data-urlencode "Password=$(cat secrets/admin.token)" https://localhost:8443/login
+          grep -i '^set-cookie: secrethive=' headers.txt | grep -qi 'secure'
+
+          # Nothing secret in the log or in the database file, and the session keys are stored encrypted.
+          docker logs hive > hive.log 2>&1
+          ! grep -q "generated-ci-value" hive.log
+          ! sudo grep -rq "generated-ci-value" data
+          test "$(docker inspect hive --format '{{.State.Running}}')" = "true"
+
+          # A host fetching its stack's secrets from this server, with the command line as it ships: an identity and
+          # a key for the host made through the API, the server's own certificate trusted and nothing else, then
+          # "bundle pull" and "render" in a container.
+          mkdir -p cli/compose/shop cli/appdata/shop cli/etc
+          curl -kfsS -X PUT -H "$auth" -H "$json" -d '{"description":"the ci host"}' https://localhost:8443/api/v1/service-identities/host-ci > /dev/null
+          curl -kfsS -X PUT -H "$auth" -H "$json" -d '{"user":"host-ci","role":"SecretsUser"}' https://localhost:8443/api/v1/vaults/ci/access
+          (umask 077; curl -kfsS -X POST -H "$auth" -H "$json" -d '{"label":"ci","days":1}' https://localhost:8443/api/v1/service-identities/host-ci/keys | jq -j .key > cli/etc/server.key)
+          test -s cli/etc/server.key
+          echo | openssl s_client -connect localhost:8443 2>/dev/null | openssl x509 > cli/compose/secrethive-server.crt
+          cat > cli/compose/secrethive.host.yml <<'YAML'
+          version: 1
+          host: ci
+          appdata: /work/appdata
+          bundle_key: /work/etc/bundle.key
+          providers: [api, bundle]
+          server: https://localhost:8443
+          server_key: /work/etc/server.key
+          server_certificate: secrethive-server.crt
+          YAML
+          cat > cli/compose/shop/secrethive.yml <<'YAML'
+          version: 1
+          stack: shop
+          vault: ci
+          targets:
+            app:
+              path: ${appdata}/shop/secrets
+              owner: "999:999"
+              restart: [shop]
+              keys:
+                Api__Token: token
+          YAML
+          cli() { docker run --rm -i --user 0 --network host -v "$PWD/cli:/work" -w /work/compose secrethive:ci "$@"; }
+          cli host keygen --host ci
+          set +e; cli bundle pull shop --host ci | tee pull.log; code=${PIPESTATUS[0]}; set -e
+          test "$code" = 10
+          grep -q "pulled     ci/token  version 1" pull.log
+          set +e; cli render shop --host ci | tee render.log; code=${PIPESTATUS[0]}; set -e
+          test "$code" = 10
+          test "$(sudo cat cli/appdata/shop/secrets/Api__Token)" = "generated-ci-value"
+          test "$(sudo stat -c '%u:%g %a' cli/appdata/shop/secrets/Api__Token)" = "999:999 400"
+          ! grep -q "generated-ci-value" pull.log render.log cli/compose/shop/secrethive.bundle
+          curl -kfsS -H "$auth" "https://localhost:8443/api/v1/audit?take=200" | grep -q '"code":"secret.value.read","severity":"Info","principal":"host-ci"'
+          # Moving a stack onto the server with what ships: a value that lives only in the host's bundle is made on
+          # the server by a key that may write, and a second push makes nothing twice.
+          curl -kfsS -X PUT -H "$auth" -H "$json" -d '{"description":"moves stacks onto the server"}' https://localhost:8443/api/v1/service-identities/mover-ci > /dev/null
+          curl -kfsS -X PUT -H "$auth" -H "$json" -d '{"user":"mover-ci","role":"SecretsOfficer"}' https://localhost:8443/api/v1/vaults/ci/access
+          (umask 077; curl -kfsS -X POST -H "$auth" -H "$json" -d '{"label":"one move","days":1}' https://localhost:8443/api/v1/service-identities/mover-ci/keys | jq -j .key > cli/etc/officer.key)
+          mkdir -p cli/compose/moved cli/appdata/moved
+          cat > cli/compose/moved/secrethive.yml <<'YAML'
+          version: 1
+          stack: moved
+          vault: ci
+          targets:
+            app:
+              path: ${appdata}/moved/secrets
+              owner: "999:999"
+              restart: [moved]
+              keys:
+                Db__Password: moved-password
+          YAML
+          printf '%s' "generated-moved-value" | cli bundle set moved moved-password --host ci
+          set +e; cli bundle push moved --host ci | tee push-readonly.log; code=${PIPESTATUS[0]}; set -e
+          test "$code" = 1
+          test "$(curl -ks -o /dev/null -w '%{http_code}' -H "$auth" https://localhost:8443/api/v1/vaults/ci/secrets/moved-password/value)" = 404
+          set +e; cli bundle push moved --host ci --server-key /work/etc/officer.key | tee push.log; code=${PIPESTATUS[0]}; set -e
+          test "$code" = 10
+          grep -q "created    ci/moved-password  version 1" push.log
+          curl -kfsS -H "$auth" https://localhost:8443/api/v1/vaults/ci/secrets/moved-password/value | grep -q '"value":"generated-moved-value"'
+          set +e; cli bundle push moved --host ci --server-key /work/etc/officer.key | tee push-again.log; code=${PIPESTATUS[0]}; set -e
+          test "$code" = 0
+          grep -q "same       ci/moved-password  version 1" push-again.log
+          set +e; cli render moved --host ci > /dev/null; code=$?; set -e
+          test "$code" = 10
+          test "$(sudo cat cli/appdata/moved/secrets/Db__Password)" = "generated-moved-value"
+          ! grep -q "generated-moved-value" push.log push-again.log push-readonly.log cli/compose/moved/secrethive.bundle
+          # Another server's certificate is not this server's: the command line does not talk to it.
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /dev/null -subj "/CN=localhost" -days 1 -out cli/compose/secrethive-server.crt 2>/dev/null
+          set +e; cli bundle pull shop --host ci > wrongcert.log 2>&1; code=$?; set -e
+          test "$code" = 1
+          grep -q "not reachable" wrongcert.log
+
+          # A backup made on request is a whole file under its final name, and the health probe knows its age.
+          curl -kfsS -X POST -H "$auth" https://localhost:8443/api/v1/backups | tee backup.json
+          backup=$(grep -o 'secrethive-[0-9]*-[0-9]*\.shbak' backup.json | head -1)
+          sudo test -s "data/backups/$backup"
+          curl -fsS http://localhost:8080/health | grep -q '"lastVerifiedUtc":"20'
+          mkdir -p backups && sudo cp "data/backups/$backup" backups/ && sudo chmod 0444 "backups/$backup"
+          echo "$backup" > backup.name
+          ! zcat "backups/$backup" | grep -q "generated-ci-value"
+          docker rm -f hive
+
+      # Moving to a new master key with what ships: the same data folder, the new key current and the old one
+      # named as retired; then the new key alone.
+      - name: Rotate the master key with the image
+        run: |
+          set -eu
+          mkdir -p rotated && openssl rand -base64 32 > rotated/master.key && cp secrets/master.key rotated/old.key && cp secrets/admin.token rotated/ && chmod 0444 rotated/*
+          auth="Authorization: Bearer $(cat secrets/admin.token)"
+          wait_up() { for i in $(seq 1 40); do if curl -fsS http://localhost:8080/health > /dev/null; then return 0; fi; sleep 1; done; return 1; }
+
+          # The new key alone cannot read the database, and the server refuses to start rather than open nothing.
+          if docker run --rm --user 1000123456:0 -v "$PWD/rotated:/run/secrets:ro" -v "$PWD/data:/data" -e SecretHive__Tls__HostNames=localhost secrethive-server:ci > blind.log 2>&1; then echo "it started with a key that reads nothing"; exit 1; fi
+          grep -q "RetiredMasterKeyFiles" blind.log
+
+          docker run -d --name hive-rotating --user 1000123456:0 -p 8080:8080 -p 8443:8443 -v "$PWD/rotated:/run/secrets:ro" -v "$PWD/data:/data"             -e SecretHive__RetiredMasterKeyFiles=/run/secrets/old.key -e SecretHive__Tls__HostNames=localhost secrethive-server:ci
+          wait_up
+          curl -kfsS -H "$auth" https://localhost:8443/api/v1/vaults/ci/secrets/token/value | grep -q '"value":"generated-ci-value"'
+          curl -kfsS -H "$auth" "https://localhost:8443/api/v1/audit?take=200" | grep -q 'keyring.rotated'
+          # The certificate the server made for itself is the same one: a proxy that trusts it is not disturbed.
+          echo | openssl s_client -connect localhost:8443 2>/dev/null | openssl x509 -noout -fingerprint -sha256 > fingerprint.after
+          cmp fingerprint.before fingerprint.after
+          docker rm -f hive-rotating
+
+          rm -f rotated/old.key
+          docker run -d --name hive-rotated --user 1000123456:0 -p 8080:8080 -p 8443:8443 -v "$PWD/rotated:/run/secrets:ro" -v "$PWD/data:/data" -e SecretHive__Tls__HostNames=localhost secrethive-server:ci
+          wait_up
+          curl -kfsS -H "$auth" https://localhost:8443/api/v1/vaults/ci/secrets/token/value | grep -q '"value":"generated-ci-value"'
+          echo | openssl s_client -connect localhost:8443 2>/dev/null | openssl x509 -noout -fingerprint -sha256 > fingerprint.final
+          cmp fingerprint.before fingerprint.final
+          docker rm -f hive-rotated
+
+      - name: Start SQL Server
+        run: |
+          docker run -d --name sql \
+            -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=SecretHive-Ci-Password-2026!' -e MSSQL_PID=Developer \
+            mcr.microsoft.com/mssql/server:2022-latest
+          for i in $(seq 1 60); do
+            if docker logs sql 2>&1 | grep -q "SQL Server is now ready for client connections"; then break; fi
+            sleep 2
+          done
+          docker logs sql 2>&1 | grep -q "ready for client connections"
+
+      - name: The image must migrate and serve against SQL Server
+        run: |
+          set -eu
+          sql_ip=$(docker inspect sql --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+          # A data folder of its own: the first one now belongs to the rotated master key.
+          mkdir -p data-sql && chmod 0777 data-sql
+          docker run -d --name hive-sql --user 1000123456:0 -p 8081:8080 -p 8444:8443 \
+            -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/data-sql:/data" \
+            -e SecretHive__Database__Provider=SqlServer \
+            -e "SecretHive__Database__ConnectionString=Server=$sql_ip,1433;Initial Catalog=SecretHive;User ID=sa;Password=SecretHive-Ci-Password-2026!;Encrypt=True;TrustServerCertificate=True" \
+            secrethive-server:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8081/health > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8081/health
+          auth="Authorization: Bearer $(cat secrets/admin.token)"
+          curl -kfsS -X PUT -H "$auth" -H "Content-Type: application/json" -d '{}' https://localhost:8444/api/v1/vaults/ci
+          curl -kfsS -H "$auth" https://localhost:8444/api/v1/vaults | grep -q '"name":"ci"'
+          docker logs hive-sql 2>&1 | tail -15
+          test "$(docker inspect hive-sql --format '{{.State.Running}}')" = "true"
+          ! docker logs hive-sql 2>&1 | grep -q "Globalization Invariant Mode is not supported"
+
+      # The restore drill with what ships: the backup made on SQLite above, a database server that has never seen
+      # it, a data folder that is empty, and the master key. Nothing else from the first server.
+      - name: Restore the SQLite backup into an empty SQL Server database with the image, and read from it
+        run: |
+          set -eu
+          backup=$(cat backup.name)
+          sql_ip=$(docker inspect sql --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+          conn="Server=$sql_ip,1433;Initial Catalog=SecretHiveRestored;User ID=sa;Password=SecretHive-Ci-Password-2026!;Encrypt=True;TrustServerCertificate=True"
+          mkdir -p data-restored && chmod 0777 data-restored
+          hive() {
+            docker run --rm --user 1000123456:0 -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/data-restored:/data" -v "$PWD/backups:/backups:ro"               -e SecretHive__Database__Provider=SqlServer -e "SecretHive__Database__ConnectionString=$conn" secrethive-server:ci "$@"
+          }
+          hive restore "/backups/$backup" 2>&1 | tee restore.log
+          grep -q "Restored" restore.log
+
+          # A second restore finds data and refuses, with its own exit code, changing nothing.
+          set +e; hive restore "/backups/$backup" > again.log 2>&1; code=$?; set -e
+          test "$code" = 2
+          grep -qi "already holds data" again.log
+
+          # Under another master key the same file is refused before anything is read.
+          mkdir -p other && openssl rand -base64 32 > other/master.key && cp secrets/admin.token other/ && chmod 0444 other/*
+          set +e
+          docker run --rm --user 1000123456:0 -v "$PWD/other:/run/secrets:ro" -v "$PWD/backups:/backups:ro"             -e SecretHive__DataDirectory=/tmp -e "SecretHive__Database__ConnectionString=Data Source=/tmp/other.db" secrethive-server:ci restore "/backups/$backup" > wrong.log 2>&1
+          code=$?; set -e
+          test "$code" = 2
+          grep -q "master key" wrong.log
+
+          docker run -d --name hive-restored --user 1000123456:0 -p 8082:8080 -p 8445:8443             -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/data-restored:/data"             -e SecretHive__Database__Provider=SqlServer -e "SecretHive__Database__ConnectionString=$conn" secrethive-server:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8082/health > /dev/null; then break; fi
+            sleep 2
+          done
+          auth="Authorization: Bearer $(cat secrets/admin.token)"
+          curl -kfsS -H "$auth" https://localhost:8445/api/v1/vaults/ci/secrets/token/value | grep -q '"value":"generated-ci-value"'
+          curl -kfsS -H "$auth" "https://localhost:8445/api/v1/audit?take=200" > audit.json
+          grep -q 'restore.executed' audit.json
+          grep -q 'secret.value.read' audit.json
+          docker logs hive-restored 2>&1 | tail -5
+
+  # A tag publishes: two binaries on the release, and one image for both architectures. The package of a private
+  # repository is private, so this is safe to run before the repository opens.
+  # The PowerShell module against a real server, in both editions, on the system it is for: saving the connection
+  # relies on Windows data protection, which no Linux job can show.
+  # The module on Windows, where -Save keeps the key under Windows data protection, and on Linux, where it refuses
+  # and a session is connected from SECRETHIVE_SERVER and SECRETHIVE_KEY_FILE.
+  powershell-module:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build the server
+        run: dotnet build src/SecretHive.Web -c Release
+
+      - name: Test the module in PowerShell 7, and on Windows in Windows PowerShell 5.1 too
+        shell: pwsh
+        run: |
+          $server = ./clients/powershell/tests/Start-TestServer.ps1 -Folder (Join-Path $env:RUNNER_TEMP 'hive')
+          try {
+            $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', './clients/powershell/tests/Test-Module.ps1',
+                           '-Server', $server.Address, '-AdminTokenFile', $server.AdminTokenFile, '-CertificateFile', $server.CertificateFile)
+            & pwsh @arguments
+            if ($LASTEXITCODE -ne 0) { throw "The module's tests failed in PowerShell 7." }
+            if ($IsWindows) {
+              & powershell @arguments
+              if ($LASTEXITCODE -ne 0) { throw "The module's tests failed in Windows PowerShell 5.1." }
+            }
+          }
+          finally {
+            Stop-Process -Id $server.ProcessId -Force -ErrorAction SilentlyContinue
+            Get-Process dotnet -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-test, container, server, browser, powershell-module]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name this build after the tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish the binaries
+        run: |
+          set -eu
+          mkdir dist
+          for arch in x64 arm64; do
+            dotnet publish src/SecretHive.Cli -c Release -r "linux-$arch" --self-contained \
+              -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
+              -p:Version='${{ steps.version.outputs.value }}' -o "out/$arch"
+            cp "out/$arch/secrethive" "dist/secrethive-linux-$arch"
+          done
+          (cd dist && sha256sum secrethive-linux-* > SHA256SUMS)
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two images: the server under the repository's own name, the command beside it as "-cli".
+      - name: Tags for the server image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push the server for both architectures
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.server
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Tags for the command image
+        id: meta-cli
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-cli
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push the command for both architectures
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          push: true
+          tags: ${{ steps.meta-cli.outputs.tags }}
+          labels: ${{ steps.meta-cli.outputs.labels }}

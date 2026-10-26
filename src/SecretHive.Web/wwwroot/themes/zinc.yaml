@@ -1,0 +1,108 @@
+# ============================================================================
+# Zinc: the look of shadcn/ui (as in Kaneo and It's a Plan), written out as a
+# theme pack. Neutral zinc greys, near-black and near-white as the accent, thin
+# borders instead of shadows, a light top bar in light mode and one colour from
+# edge to edge in dark mode. Light and dark both; the toggle and the system
+# preference pick between them as for every pack.
+#
+# The colours are Tailwind's zinc scale, the one shadcn/ui's default theme is
+# built on. No font is downloaded: Inter or Geist where installed, the system's
+# own sans-serif otherwise.
+# ============================================================================
+
+name: zinc
+label: Zinc
+description: Neutral zinc greys, near-black and white accents, thin borders; in the style of shadcn/ui.
+
+fonts:
+  ui: "'Inter', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+  mono: "'Geist Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace"
+
+branding:
+  titlePlain: SecretHive
+
+layout:
+  radius: 6px
+  radiusLarge: 10px
+
+tokens:
+  light:
+    bg: "#ffffff"
+    surface: "#ffffff"
+    inset: "#f4f4f5"
+    hover: "#f4f4f5"
+    border: "#e4e4e7"
+    border-strong: "#d4d4d8"
+
+    text: "#09090b"
+    text-2: "#71717a"
+    text-3: "#a1a1aa"
+
+    # The top bar is the page's own colour, set off by a border (below), not a dark band.
+    chrome: "#ffffff"
+    chrome-text: "#09090b"
+    chrome-muted: "#71717a"
+    chrome-hover: "rgb(0 0 0 / 0.05)"
+    chrome-strong: "#09090b"
+
+    accent: "#18181b"
+    accent-strong: "#09090b"
+    accent-soft: "#f4f4f5"
+    accent-contrast: "#fafafa"
+
+    ok: "#16a34a"
+    ok-soft: "#f0fdf4"
+    warn: "#d97706"
+    warn-soft: "#fffbeb"
+    danger: "#dc2626"
+    danger-soft: "#fef2f2"
+    info: "#2563eb"
+    info-soft: "#eff6ff"
+
+    shadow-1: "0 1px 2px 0 rgb(0 0 0 / 0.04)"
+    shadow-2: "0 10px 30px -12px rgb(0 0 0 / 0.25)"
+
+  dark:
+    bg: "#09090b"
+    surface: "#0f0f11"
+    inset: "#18181b"
+    hover: "#1f1f23"
+    border: "#27272a"
+    border-strong: "#3f3f46"
+
+    text: "#fafafa"
+    text-2: "#a1a1aa"
+    text-3: "#71717a"
+
+    chrome: "#09090b"
+    chrome-text: "#fafafa"
+    chrome-muted: "#a1a1aa"
+    chrome-hover: "rgb(255 255 255 / 0.06)"
+    chrome-strong: "#ffffff"
+
+    accent: "#fafafa"
+    accent-strong: "#ffffff"
+    accent-soft: "#27272a"
+    accent-contrast: "#18181b"
+
+    ok: "#4ade80"
+    ok-soft: "#052e16"
+    warn: "#fbbf24"
+    warn-soft: "#2a1d05"
+    danger: "#f87171"
+    danger-soft: "#2a0f0f"
+    info: "#60a5fa"
+    info-soft: "#0b1a33"
+
+    shadow-1: "none"
+    shadow-2: "0 10px 30px -12px rgb(0 0 0 / 0.6)"
+
+# What the tokens cannot say: a line under the light top bar, and tooltips the opposite of the page, as in
+# shadcn/ui (dark on light, light on dark). Links in running text share the text's colour and are underlined on hover.
+customCss: |
+  .sh-topbar { border-bottom: 1px solid var(--border); }
+  .sh-tooltip, .sh-tooltip::after { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .sh-reconnect { border-bottom: 1px solid var(--border); }
+  .sh-card { box-shadow: var(--shadow-1); }
+  .sh-btn-primary:hover { opacity: 0.9; }
+  a:hover { text-underline-offset: 3px; }

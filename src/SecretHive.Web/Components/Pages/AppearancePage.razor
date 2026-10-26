@@ -1,0 +1,168 @@
+@page "/admin/appearance"
+@layout AdminLayout
+@using SecretHive.Application.Ports
+@using SecretHive.Web.Theming
+@inject IJSRuntime Js
+@inject Vaults Vaults
+@inject IThemeService Themes
+@inject ThemeChoice Theme
+@inject NavigationManager Navigation
+
+<PageTitle>Appearance · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Appearance</h1>
+        <p class="sh-lede">How the pages look: light or dark in this browser, and the theme for everyone.</p>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+@if (notice is not null)
+{
+    <div class="sh-done" role="status">@notice</div>
+}
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>Light or dark</h2><span class="sh-badge">@chosen</span></div>
+    <div class="sh-card-body">
+        <div class="sh-form-actions">
+            <button type="button" class="sh-btn" data-theme-choice="" @onclick="@(() => chosen = "system")">Follow the system</button>
+            <button type="button" class="sh-btn" data-theme-choice="light" @onclick="@(() => chosen = "light")">Light</button>
+            <button type="button" class="sh-btn" data-theme-choice="dark" @onclick="@(() => chosen = "dark")">Dark</button>
+        </div>
+        <p class="sh-muted sh-small">The choice is kept in this browser. The button in the top bar switches between the two.</p>
+    </div>
+</div>
+
+<div class="sh-card">
+    <div class="sh-card-header">
+        <h2>Theme</h2>
+        <span class="sh-badge sh-badge-accent">@(Theme.Name is { } active ? Label(active) : "built-in")</span>
+    </div>
+    <div class="sh-card-body">
+        <p class="sh-muted" style="margin-top: 0">
+            A theme pack is a YAML file that restates colours, fonts and, if it wants, the name and logo in the top
+            bar. It holds no code. The built-in look is paper and graphite with deep teal as the accent.
+        </p>
+        @if (Vaults.IsAdmin)
+        {
+            <div class="sh-row">
+                <select class="sh-select" style="width: 260px" @bind="selected">
+                    <option value="">Built-in</option>
+                    @foreach (var pack in Themes.Packs)
+                    {
+                        <option value="@pack.Name">@pack.Label</option>
+                    }
+                </select>
+                <button type="button" class="sh-btn sh-btn-primary" @onclick="Apply">Use for everyone</button>
+            </div>
+            @if (Themes.Packs.FirstOrDefault(pack => pack.Name == selected)?.Description is { Length: > 0 } description)
+            {
+                <p class="sh-hint">@description</p>
+            }
+        }
+        else
+        {
+            <p class="sh-muted" style="margin-bottom: 0">An administrator chooses the theme.</p>
+        }
+    </div>
+</div>
+
+@if (Vaults.IsAdmin)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2>Packs</h2>
+            <div class="sh-right"><button type="button" class="sh-btn sh-btn-sm" @onclick="Reload">Read the folder again</button></div>
+        </div>
+        @if (Themes.Packs.Count == 0)
+        {
+            <div class="sh-empty">No packs found. The built-in look is all there is until one is added.</div>
+        }
+        else
+        {
+            <div class="sh-table-wrap">
+                <table class="sh-table">
+                    <thead><tr><th>Name</th><th>Label</th><th>Description</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var pack in Themes.Packs)
+                        {
+                            <tr>
+                                <td class="sh-mono">@pack.Name</td>
+                                <td>@pack.Label</td>
+                                <td class="sh-small">@pack.Description</td>
+                                <td><a class="sh-btn sh-btn-sm" href="@($"/themes/{pack.Name}.css")" target="_blank" rel="noopener">View CSS</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <div class="sh-card-body">
+            <p class="sh-hint" style="margin: 0">
+                Two packs ship with the server. Your own go in <span class="sh-mono">@Themes.OperatorDirectory</span>
+                as <span class="sh-mono">name.yaml</span>, with a logo file beside it if the pack names one; a pack of
+                your own with the same name as a shipped one replaces it. The colour names are the ones the sibling
+                applications use, so a pack written for them loads here unchanged.
+            </p>
+        </div>
+    </div>
+}
+
+@code {
+    private string chosen = "system";
+    private string selected = "";
+    private string? problem;
+    private string? notice;
+
+    protected override void OnInitialized() => selected = Theme.Name ?? "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            chosen = await Js.InvokeAsync<string>("secretHive.theme");
+            StateHasChanged();
+        }
+    }
+
+    private string Label(string name) => Themes.Packs.FirstOrDefault(pack => pack.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Label ?? name;
+
+    private async Task Apply()
+    {
+        problem = notice = null;
+        if (!Vaults.IsAdmin)
+        {
+            problem = "An administrator chooses the theme.";
+            return;
+        }
+
+        // A name that is not on disk would leave every page asking for a stylesheet that is not there.
+        var name = selected.Trim();
+        if (name.Length > 0 && Themes.GetCss(name) is null)
+        {
+            problem = $"There is no pack named '{name}'.";
+            return;
+        }
+
+        await Vaults.With<ISecretStore, bool>(async store =>
+        {
+            await store.SetSettingAsync(ThemeChoice.SettingKey, name.Length == 0 ? null : name, default);
+            await store.SaveAsync(default);
+            return true;
+        });
+        Theme.Name = name;
+        await Vaults.Audit("appearance.theme.changed", name.Length == 0 ? "built-in" : name);
+
+        // A full load: the stylesheet link is in the head of the page, which a navigation inside the page leaves alone.
+        Navigation.NavigateTo("/admin/appearance", forceLoad: true);
+    }
+
+    private void Reload()
+    {
+        problem = null;
+        Themes.Reload();
+        notice = $"Read the folders again: {Themes.Packs.Count} pack(s).";
+    }
+}

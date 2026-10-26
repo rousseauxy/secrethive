@@ -1,0 +1,80 @@
+name: Dependencies
+
+# A daily look at what is known to be vulnerable in this project, and a weekly one at what is behind.
+#
+#   report   NuGet packages with a known vulnerability (dotnet list package --vulnerable) fail the
+#            run; on Monday or by hand, outdated packages and aged base-image pins are listed too
+#   images   the published images, through osv.dev: its Ubuntu packages as osv-scanner reads them,
+#            and the .NET runtime read out of the image (no scanner sees it). Only a finding with a
+#            fix available fails the run; on Monday the rest is counted
+#
+# Findings are posted to the alert room as on the forge, with ALERT_RELAY_TOKEN stored here: a copy that can only
+# post to that room, so this check does not depend on the vault at home. A failed scheduled run also comes by mail.
+# The scripts in tools/ci are shared
+# with sibling projects and kept identical to theirs.
+on:
+  schedule:
+    - cron: '47 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  PROJECT: SecretHive
+  OSV_SCANNER_VERSION: v2.7.0
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore secrethive.slnx
+      - name: List vulnerable and outdated packages
+        run: |
+          dotnet list secrethive.slnx package --vulnerable --include-transitive --format json > vulnerable.json
+          dotnet list secrethive.slnx package --outdated --format json > outdated.json
+      - name: Report
+        env:
+          EVENT: ${{ github.event_name }}
+          ALERT_RELAY_URL: ${{ vars.ALERT_RELAY_URL }}
+          ALERT_RELAY_TOKEN: ${{ secrets.ALERT_RELAY_TOKEN }}
+        run: |
+          if [ "$EVENT" != "schedule" ] || [ "$(date -u +%u)" = "1" ]; then
+            node tools/ci/dependency-report.mjs --vulnerable vulnerable.json --outdated outdated.json --images deploy/Dockerfile,deploy/Dockerfile.server
+          else
+            node tools/ci/dependency-report.mjs --vulnerable vulnerable.json
+          fi
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install osv-scanner
+        run: |
+          base=https://github.com/google/osv-scanner/releases/download/$OSV_SCANNER_VERSION
+          curl -fsSLO "$base/osv-scanner_linux_amd64"
+          curl -fsSLO "$base/osv-scanner_SHA256SUMS"
+          grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS | sha256sum -c -
+          install -m 755 osv-scanner_linux_amd64 osv-scanner
+      - name: Scan the published images and report
+        env:
+          EVENT: ${{ github.event_name }}
+          ALERT_RELAY_URL: ${{ vars.ALERT_RELAY_URL }}
+          ALERT_RELAY_TOKEN: ${{ secrets.ALERT_RELAY_TOKEN }}
+        run: |
+          images=$(sh tools/ci/image-scan.sh secrethive=ghcr.io/rousseauxy/secrethive:latest secrethive-cli=ghcr.io/rousseauxy/secrethive-cli:latest)
+          weekly=""
+          if [ "$EVENT" != "schedule" ] || [ "$(date -u +%u)" = "1" ]; then weekly="--weekly"; fi
+          node tools/ci/image-report.mjs $images $weekly

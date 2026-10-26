@@ -1,0 +1,68 @@
+@using Microsoft.AspNetCore.Antiforgery
+@using SecretHive.Web.Security
+@inject IAntiforgery Antiforgery
+@inject SecretHive.Web.Theming.IThemeService Themes
+@inject SecretHive.Web.Theming.ThemeChoice Theme
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    @* The chosen pack restates colours after the server's own stylesheet; its icon, when it has one, is the tab's. *@
+    <link rel="icon" href="@(Themes.GetBrand(Theme.Name).FaviconUrl ?? Assets["favicon.svg"])" />
+    @if (Theme.Name is { } pack && Themes.GetCss(pack) is not null)
+    {
+        <link rel="stylesheet" href="@($"/themes/{pack}.css")" />
+    }
+    <HeadOutlet @rendermode="PageMode" />
+    @* Applied before the first paint, so neither deferred nor at the end of the body: either would run after the
+       page has been drawn, and every load would flash the other theme. Its own file, because the
+       Content-Security-Policy runs no inline script. *@
+    <script src="@Assets["theme.js"]"></script>
+</head>
+<body>
+    @* Who is signed in and from where is read here, where there still is a request, and handed to the pages. *@
+    <Routes @rendermode="PageMode"
+            Principal="@(HttpContext.User.Identity?.Name)"
+            Address="@Address"
+            UserKey="@(Accounts.Actor(HttpContext.User)?.Key)"
+            Stamp="@(HttpContext.User.FindFirst(Accounts.StampClaim)?.Value)"
+            IsAdmin="@HttpContext.User.IsInRole(Accounts.AdminRole)"
+            IsSuperAdmin="@HttpContext.User.IsInRole(Accounts.SuperAdminRole)"
+            FormTokenName="@tokens?.FormFieldName"
+            FormToken="@tokens?.RequestToken" />
+    @* The page's live connection to the server, when it drops: a phone that leaves the browser for another app
+       freezes the tab and closes it. Instead of the framework's white box, a bar at the top says what is going on;
+       the framework sets the class (show, retrying, failed, rejected, ...), app.js handles the two buttons. *@
+    <div id="components-reconnect-modal" class="sh-reconnect" data-nosnippet aria-live="polite">
+        <span class="sh-reconnect-busy">Reconnecting…</span>
+        <span class="sh-reconnect-lost">The connection to the server was lost. <button type="button" class="sh-btn sh-btn-sm" data-reconnect="retry">Retry</button></span>
+        <span class="sh-reconnect-gone">This page's session has ended. <button type="button" class="sh-btn sh-btn-sm" data-reconnect="reload">Reload</button></span>
+    </div>
+    <script src="_framework/blazor.web.js"></script>
+    <script src="@Assets["app.js"]"></script>
+</body>
+</html>
+
+@code {
+    private AntiforgeryTokenSet? tokens;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // An IPv4 caller on a socket that also listens on IPv6 arrives as "::ffff:192.0.2.1"; record the address itself.
+    private string? Address => HttpContext.Connection.RemoteIpAddress is { } address
+        ? (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString()
+        : null;
+
+    // Every page is interactive except the forms that have to set a cookie, which need a plain request.
+    // No prerendering: a page that reads would otherwise read twice.
+    private IComponentRenderMode? PageMode =>
+        HttpContext.AcceptsInteractiveRouting() ? new InteractiveServerRenderMode(prerender: false) : null;
+
+    // The sign-out form is a POST, and an interactive page has no request of its own to make a token from.
+    protected override void OnInitialized() =>
+        tokens = HttpContext.AcceptsInteractiveRouting() && HttpContext.User.Identity?.IsAuthenticated == true ? Antiforgery.GetAndStoreTokens(HttpContext) : null;
+}

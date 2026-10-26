@@ -1,0 +1,175 @@
+@page "/admin/tokens"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@using SecretHive.Application.Accounts
+@using SecretHive.Application.Ports
+@inject Vaults Vaults
+@inject SecretHive.Web.Security.ServerInfo Server
+
+<PageTitle>Tokens · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Tokens</h1>
+        <p class="sh-lede">
+            Service identities and their keys. A service identity is a name for a machine: one per job, so what a job
+            read is on record under the job's own name. Give it a role in a vault as you would an account.
+        </p>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+
+@foreach (var service in services)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2 class="sh-mono">@service.UserName</h2>
+            <span class="sh-muted sh-small">@service.DisplayName</span>
+            @if (service.IsDisabled)
+            {
+                <span class="sh-badge sh-badge-danger">disabled</span>
+            }
+            @if (service.Role == UserRole.Admin)
+            {
+                <span class="sh-badge sh-badge-warn" title="Its keys act as an admin of this server">admin</span>
+            }
+            <div class="sh-right">
+                @if (Vaults.IsSuperAdmin)
+                {
+                    <select class="sh-select" style="width: 150px" aria-label="Role on this server" value="@service.Role.ToString()" @onchange="e => SetRole(service, (string?)e.Value)">
+                        <option value="User">no admin role</option>
+                        <option value="Admin">admin</option>
+                    </select>
+                }
+                <button class="sh-btn sh-btn-sm" @onclick="() => SetDisabled(service, !service.IsDisabled)">@(service.IsDisabled ? "Enable" : "Disable")</button>
+                @if (deleting == service.Key)
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Delete(service)">Delete, with its keys and roles</button>
+                    <button class="sh-btn sh-btn-sm" @onclick="() => deleting = null">Cancel</button>
+                }
+                else
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => deleting = service.Key">Delete…</button>
+                }
+            </div>
+        </div>
+        <div class="sh-card-body">
+            <KeyManager OwnerKey="service.Key" />
+        </div>
+    </div>
+}
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>New service identity</h2></div>
+    <div class="sh-card-body">
+        <form class="sh-form" @onsubmit="Create">
+            <div class="sh-field">
+                <label class="sh-label">Name</label>
+                <input class="sh-input sh-mono" @bind="name" placeholder="stack-web-1-shop" />
+                <span class="sh-hint">For a compose stack on a host: stack-&lt;host&gt;-&lt;stack&gt;.</span>
+            </div>
+            <div class="sh-field">
+                <label class="sh-label">What it is</label>
+                <input class="sh-input" @bind="description" />
+            </div>
+            <div class="sh-form-actions"><button class="sh-btn sh-btn-primary" type="submit">Create</button></div>
+        </form>
+    </div>
+</div>
+
+<div class="sh-card">
+    @if (Server.BootstrapToken)
+    {
+        <div class="sh-card-header"><h2>The bootstrap token</h2><span class="sh-badge sh-badge-warn">may do everything</span></div>
+        <div class="sh-card-body">
+            <p class="sh-muted" style="margin: 0">
+                The token in the file the server was started with still works as a bearer token, belongs to nobody and is not
+                limited by any role. Use it to set things up; give every job a service identity and a key of its own. Once a
+                super admin signs in with a password of their own, the file can be taken away and the server restarted: the
+                token then opens nothing.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="sh-card-header"><h2>The bootstrap token</h2><span class="sh-badge sh-badge-ok">not in use</span></div>
+        <div class="sh-card-body">
+            <p class="sh-muted" style="margin: 0">
+                The server was started without a token file: no token opens anything. To get back in when no super admin
+                can sign in, put a token file in place and restart.
+            </p>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<User> services = [];
+    private string name = "";
+    private string description = "";
+    private string? problem;
+    private int? deleting;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        services = [.. (await Vaults.With<IUserStore, IReadOnlyList<User>>(store => store.ListAsync(default))).Where(user => user.IsService)];
+        deleting = null;
+    }
+
+    private async Task Do(Func<AccountService, Task<AccountOutcome>> act, string code, string subject)
+    {
+        var outcome = await Vaults.With(act);
+        problem = outcome switch
+        {
+            AccountOutcome.Done => null,
+            AccountOutcome.NameTaken => "That name is taken.",
+            AccountOutcome.InvalidName => "That is not a name: letters, digits and . _ - @ only.",
+            AccountOutcome.Forbidden => "Your role does not allow that.",
+            _ => "That identity no longer exists.",
+        };
+        if (problem is null)
+        {
+            await Vaults.Audit(code, subject, AuditSeverity.Notice);
+        }
+
+        await Load();
+    }
+
+    private async Task Create()
+    {
+        var created = name.Trim();
+        await Do(async accounts => (await accounts.CreateServiceAsync(Vaults.Actor!, name, description, default)).Outcome, "service.created", created);
+        if (problem is null)
+        {
+            name = description = "";
+        }
+    }
+
+    // A super admin makes a service identity an admin, or takes it back. Its keys then act as an admin, never as a
+    // super admin; the keys themselves are made and ended by a super admin only.
+    private async Task SetRole(User service, string? chosen)
+    {
+        var role = chosen == nameof(UserRole.Admin) ? UserRole.Admin : UserRole.User;
+        if (role == service.Role)
+        {
+            return;
+        }
+
+        var outcome = await Vaults.With<AccountService, AccountOutcome>(accounts => accounts.SetServiceRoleAsync(Vaults.Actor!, service.Key, role, default));
+        problem = outcome == AccountOutcome.Done ? null : "Only a super admin decides whether a service identity is an admin.";
+        if (problem is null)
+        {
+            await Vaults.Audit("service.role.changed", $"{service.UserName} {(service.Role == UserRole.Admin ? "admin" : "user")} -> {(role == UserRole.Admin ? "admin" : "user")}", role == UserRole.Admin ? AuditSeverity.Security : AuditSeverity.Notice);
+        }
+
+        await Load();
+    }
+
+    private Task SetDisabled(User service, bool disabled) =>
+        Do(accounts => accounts.SetDisabledAsync(Vaults.Actor!, service.Key, disabled, default), disabled ? "service.disabled" : "service.enabled", service.UserName);
+
+    private Task Delete(User service) =>
+        Do(accounts => accounts.DeleteAsync(Vaults.Actor!, service.Key, default), "service.deleted", service.UserName);
+}

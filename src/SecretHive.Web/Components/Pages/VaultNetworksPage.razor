@@ -1,0 +1,76 @@
+@page "/vaults/{Vault}/networks"
+@layout VaultLayout
+@inject Vaults Vaults
+
+<PageTitle>Networks of @Vault · SecretHive</PageTitle>
+
+<VaultHeader Vault="@Vault" Role="role" CanManage="canManage" Active="networks" />
+
+<Problem Message="@problem" />
+
+@if (canManage)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2>Allowed networks</h2>
+            <span class="sh-muted sh-small">Where this vault may be used from, whatever role someone holds.</span>
+        </div>
+        <div class="sh-card-body">
+            <NetworkList Lines="networks" Groups="networkGroups" Anywhere="Not limited: used from any address its roles allow." OnAdd="Allow" OnRemove="Disallow" />
+            <p class="sh-hint">
+                With anything listed, the secrets here are refused from every other address, and each refusal is on record.
+                This page and the access list stay reachable from anywhere, so a wrong range can be corrected.
+                Your address now: <span class="sh-mono">@(Vaults.Caller.Address ?? "unknown")</span>.
+            </p>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<SecretHive.Application.Accounts.NetworkLine> networks = [];
+    private IReadOnlyList<(int Key, string Name)> networkGroups = [];
+    private VaultRole? role;
+    private bool canManage;
+    private string? problem;
+
+    [Parameter]
+    public string Vault { get; set; } = "";
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        networks = [];
+        try
+        {
+            // From anywhere: whoever may correct the networks must be able to when they are the problem.
+            role = await Vaults.Run(service => service.RoleAsync(Vault, Vaults.Caller));
+            canManage = await Vaults.Run(service => service.CanManageAccessAsync(Vault, Vaults.Caller));
+            if (!canManage)
+            {
+                problem ??= "Only whoever manages this vault sees where it may be used from.";
+                return;
+            }
+
+            networks = await Vaults.Run(service => service.ListNetworksAsync(Vault, Vaults.Caller));
+            networkGroups = await Vaults.With<SecretHive.Application.Accounts.NetworkService, IReadOnlyList<(int, string)>>(service => service.ListNamesAsync());
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    private async Task Reload(string? said)
+    {
+        problem = null;
+        await Load();
+        problem = said ?? problem;
+    }
+
+    private async Task Allow((int? GroupKey, string? Range) line) =>
+        await Reload(await Vaults.Try(service => service.AllowNetworkAsync(Vault, line.GroupKey, line.Range, Vaults.Caller)));
+
+    private async Task Disallow(int lineKey) =>
+        await Reload(await Vaults.Try(service => service.DisallowNetworkAsync(Vault, lineKey, Vaults.Caller)));
+}

@@ -1,0 +1,167 @@
+@page "/account/profile"
+@using SecretHive.Application.Accounts
+@using SecretHive.Application.Ports
+@inject Vaults Vaults
+@inject NavigationManager Navigation
+
+<PageTitle>Profile · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div><h1>Profile</h1></div>
+</div>
+
+<Problem Message="@problem" />
+@if (notice is not null)
+{
+    <div class="sh-done" role="status">@notice</div>
+}
+
+@if (user is null)
+{
+    <div class="sh-card">
+        <div class="sh-card-body">This session is not an account: it has no profile.</div>
+    </div>
+}
+else
+{
+    <div class="sh-card">
+        <div class="sh-card-header"><h2>You</h2><span class="sh-badge sh-badge-accent">@RoleName(user.Role)</span></div>
+        <div class="sh-card-body">
+            <form class="sh-form" @onsubmit="Save">
+                <div class="sh-field">
+                    <label class="sh-label">User name</label>
+                    <input class="sh-input sh-mono" value="@user.UserName" disabled />
+                </div>
+                <div class="sh-field">
+                    <label class="sh-label">Display name</label>
+                    <input class="sh-input" @bind="displayName" />
+                </div>
+                <div class="sh-field">
+                    <label class="sh-label">Email</label>
+                    <input class="sh-input" type="email" @bind="email" />
+                </div>
+                <div class="sh-form-actions">
+                    <button class="sh-btn sh-btn-primary" type="submit">Save</button>
+                    @if (saved)
+                    {
+                        <span class="sh-muted">Saved.</span>
+                    }
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="sh-card">
+        <div class="sh-card-header"><h2>Password</h2></div>
+        <div class="sh-card-body">
+            <p class="sh-muted" style="margin-top: 0">Changing it ends every other session of this account.</p>
+            <a class="sh-btn" href="@SecretHive.Web.Security.Accounts.PasswordPath">Change password</a>
+        </div>
+    </div>
+
+    @if (providers.Count > 0 || logins.Count > 0)
+    {
+        <div class="sh-card">
+            <div class="sh-card-header"><h2>Sign-in providers</h2><span class="sh-muted sh-small">Other ways into this same account.</span></div>
+            <div class="sh-card-body">
+                @* Plain form posts: a connection starts and ends with a redirect to the provider, which a page cannot do. *@
+                @foreach (var provider in providers)
+                {
+                    var login = logins.FirstOrDefault(candidate => candidate.ProviderKey == provider.Key);
+                    <div class="sh-row sh-provider-row">
+                        <b>@provider.DisplayName</b>
+                        @if (login is null)
+                        {
+                            <span class="sh-muted">not connected</span>
+                            <form method="post" action="/account/external/@provider.Slug/link" class="sh-right" data-enhance-nav="false">
+                                <input type="hidden" name="@Vaults.FormTokenName" value="@Vaults.FormToken" />
+                                <button class="sh-btn sh-btn-sm" type="submit">Connect</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <span class="sh-muted">connected@(login.Email.Length > 0 ? " as " + login.Email : ""), last used @(login.LastUsedUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "never")</span>
+                            <form method="post" action="/account/external/logins/@login.Key/remove" class="sh-right" data-enhance-nav="false">
+                                <input type="hidden" name="@Vaults.FormTokenName" value="@Vaults.FormToken" />
+                                <button class="sh-btn sh-btn-sm" type="submit">Disconnect</button>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="sh-card">
+        <div class="sh-card-header"><h2>Keys</h2><span class="sh-muted sh-small">For your own scripts and tools. A key acts as you, inside the limits you give it.</span></div>
+        <div class="sh-card-body">
+            <KeyManager OwnerKey="user.Key" />
+        </div>
+    </div>
+
+    <div class="sh-card">
+        <div class="sh-card-header"><h2>This session</h2></div>
+        <div class="sh-card-body">
+            <dl class="sh-facts">
+                <dt>From</dt><dd class="sh-mono">@(Vaults.Caller.Address ?? "unknown")</dd>
+                <dt>Last sign-in</dt><dd>@(user.LastSignInUtc?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "—") UTC</dd>
+                <dt>Account since</dt><dd>@user.CreatedUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</dd>
+            </dl>
+        </div>
+    </div>
+}
+
+@code {
+    private User? user;
+    private string displayName = "";
+    private string email = "";
+    private string? problem;
+    private string? notice;
+    private bool saved;
+    private IReadOnlyList<OidcProvider> providers = [];
+    private IReadOnlyList<ExternalLogin> logins = [];
+
+    [SupplyParameterFromQuery]
+    private string? Linked { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Unlinked { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Vaults.Actor is { } actor)
+        {
+            user = await Vaults.With<IUserStore, User?>(store => store.FindAsync(actor.Key, default));
+            displayName = user?.DisplayName ?? "";
+            email = user?.Email ?? "";
+            logins = await Vaults.With<IExternalLoginStore, IReadOnlyList<ExternalLogin>>(store => store.ListForUserAsync(actor.Key, default));
+            var all = await Vaults.With<IOidcProviderStore, IReadOnlyList<OidcProvider>>(store => store.ListAsync(default));
+            providers = [.. all.Where(provider => provider.Enabled || logins.Any(login => login.ProviderKey == provider.Key))];
+        }
+
+        (notice, problem) = (Linked, Unlinked) switch
+        {
+            ("ok", _) => ("Connected. You can sign in through that provider from now on.", null),
+            ("already", _) => ("That identity was already connected to this account.", null),
+            ("taken", _) => (null, "That identity is connected to another account."),
+            ("expired" or "unknown", _) => (null, "Connecting did not work. Try again."),
+            (_, "ok") => ("Disconnected.", null),
+            (_, "last") => (null, "That is the only way into this account. Set a password first."),
+            _ => ((string?)null, (string?)null),
+        };
+    }
+
+    private async Task Save()
+    {
+        var outcome = await Vaults.With<AccountService, AccountOutcome>(accounts => accounts.UpdateProfileAsync(user!.Key, displayName, email, default));
+        saved = outcome == AccountOutcome.Done;
+        problem = saved ? null : "The profile could not be saved.";
+    }
+
+    internal static string RoleName(UserRole role) => role switch
+    {
+        UserRole.SuperAdmin => "super admin",
+        UserRole.Admin => "admin",
+        _ => "user",
+    };
+}

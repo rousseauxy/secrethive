@@ -1,0 +1,216 @@
+@page "/admin/groups"
+@layout AdminLayout
+@attribute [Authorize(Roles = SecretHive.Web.Security.Accounts.AdminRole)]
+@using SecretHive.Application.Accounts
+@using SecretHive.Application.Ports
+@inject Vaults Vaults
+
+<PageTitle>Groups · SecretHive</PageTitle>
+
+<div class="sh-page-head">
+    <div>
+        <h1>Groups</h1>
+        <p class="sh-lede">A group is given a role in a vault once, and everyone in it holds that role. A group grants nothing by itself.</p>
+    </div>
+</div>
+
+<Problem Message="@problem" />
+
+@foreach (var group in groups)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2 class="sh-mono">@group.Name</h2>
+            <span class="sh-muted sh-small">@group.Description</span>
+            <div class="sh-right">
+                @if (deleting == group.Key)
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => Do(service => service.DeleteAsync(group.Key, Vaults.Caller))">Delete, with every role it holds</button>
+                    <button class="sh-btn sh-btn-sm" @onclick="() => deleting = null">Cancel</button>
+                }
+                else
+                {
+                    <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => deleting = group.Key">Delete…</button>
+                }
+            </div>
+        </div>
+        <div class="sh-card-body">
+            @if (group.Members.Count == 0)
+            {
+                <p class="sh-muted" style="margin-top: 0">Nobody is in this group.</p>
+            }
+            else
+            {
+                <div class="sh-row" style="margin-bottom: 12px">
+                    @foreach (var member in group.Members)
+                    {
+                        <span class="sh-badge">
+                            <span class="sh-mono">@member.UserName</span>
+                            @if (member.Source != "manual")
+                            {
+                                <span class="sh-muted"> via @member.Source</span>
+                            }
+                            <button class="sh-btn sh-btn-sm" style="margin-left: 6px" title="Remove from the group" @onclick="() => Do(service => service.RemoveMemberAsync(group.Key, member.UserKey, Vaults.Caller))">×</button>
+                        </span>
+                    }
+                </div>
+            }
+            <div class="sh-row">
+                <Picker Style="width: 260px" Placeholder="Search an account to add…"
+                        Items="@([.. users.Where(user => group.Members.All(member => member.UserKey != user.Key)).OrderBy(user => user.UserName, StringComparer.OrdinalIgnoreCase).Select(user => new Picker.Item(user.Key.ToString(CultureInfo.InvariantCulture), user.IsService ? "service" : "user", user.UserName))])"
+                        Value="@(adding[group.Key] == 0 ? "" : adding[group.Key].ToString(CultureInfo.InvariantCulture))"
+                        ValueChanged="@(chosen => adding[group.Key] = int.Parse(chosen, CultureInfo.InvariantCulture))" />
+                <button class="sh-btn sh-btn-sm" @onclick="() => Add(group.Key)">Add</button>
+            </div>
+            @if (providers.Count > 0)
+            {
+                <hr class="sh-rule" />
+                <p class="sh-muted sh-small" style="margin-top: 0">
+                    Linked groups at a provider: whoever signs in through it while in such a group is a member here,
+                    and stops being one at the first sign-in after leaving it.
+                </p>
+                @foreach (var link in links.Where(link => link.GroupKey == group.Key))
+                {
+                    <span class="sh-badge">
+                        @link.ProviderName: <span class="sh-mono">@link.ProviderGroup</span>
+                        <button class="sh-btn sh-btn-sm" style="margin-left: 6px" title="Remove the link" @onclick="() => Links(service => service.UnlinkGroupAsync(group.Key, link.Key, Vaults.Caller))">×</button>
+                    </span>
+                }
+                <div class="sh-row" style="margin-top: 8px">
+                    <select class="sh-select" style="width: 180px" @bind="linking[group.Key].Provider">
+                        @foreach (var provider in providers)
+                        {
+                            <option value="@provider.Key">@provider.Name@(provider.SendsGroups ? "" : " (no groups claim)")</option>
+                        }
+                    </select>
+                    <input class="sh-input sh-mono" style="width: 220px" placeholder="group name at the provider" @bind="linking[group.Key].Group" />
+                    <button class="sh-btn sh-btn-sm" @onclick="() => Link(group.Key)">Link</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<div class="sh-card">
+    <div class="sh-card-header"><h2>New group</h2></div>
+    <div class="sh-card-body">
+        <form class="sh-form" @onsubmit="Create">
+            <div class="sh-field">
+                <label class="sh-label">Name</label>
+                <input class="sh-input sh-mono" @bind="name" placeholder="operations" />
+                <span class="sh-hint">Letters, digits and hyphens.</span>
+            </div>
+            <div class="sh-field">
+                <label class="sh-label">Description</label>
+                <input class="sh-input" @bind="description" />
+            </div>
+            <div class="sh-form-actions"><button class="sh-btn sh-btn-primary" type="submit">Create group</button></div>
+        </form>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<GroupSummary> groups = [];
+    private IReadOnlyList<User> users = [];
+    private readonly Dictionary<int, int> adding = [];
+    private IReadOnlyList<ProviderGroupLink> links = [];
+    private IReadOnlyList<(int Key, string Name, bool SendsGroups)> providers = [];
+    private readonly Dictionary<int, LinkForm> linking = [];
+    private int? deleting;
+    private string name = "";
+    private string? description;
+    private string? problem;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        groups = await Vaults.With<GroupService, IReadOnlyList<GroupSummary>>(service => service.ListAsync(Vaults.Caller));
+        users = await Vaults.With<IUserStore, IReadOnlyList<User>>(store => store.ListAsync(default));
+        links = await Vaults.With<ProviderService, IReadOnlyList<ProviderGroupLink>>(service => service.ListLinksAsync(Vaults.Caller));
+        providers = await Vaults.With<ProviderService, IReadOnlyList<(int, string, bool)>>(service => service.ListNamesAsync(Vaults.Caller));
+        foreach (var group in groups)
+        {
+            adding.TryAdd(group.Key, 0);
+            linking.TryAdd(group.Key, new LinkForm { Provider = providers.Count > 0 ? providers[0].Key : 0 });
+        }
+
+        deleting = null;
+    }
+
+    private async Task Do(Func<GroupService, Task> act)
+    {
+        try
+        {
+            problem = null;
+            await Vaults.With<GroupService, bool>(async service =>
+            {
+                await act(service);
+                return true;
+            });
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+
+        await Load();
+    }
+
+    private async Task Links(Func<ProviderService, Task> act)
+    {
+        try
+        {
+            problem = null;
+            await Vaults.With<ProviderService, bool>(async service =>
+            {
+                await act(service);
+                return true;
+            });
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+
+        await Load();
+    }
+
+    private async Task Link(int groupKey)
+    {
+        var form = linking[groupKey];
+        var (provider, name) = (form.Provider, form.Group);
+        await Links(service => service.LinkGroupAsync(groupKey, provider, name, Vaults.Caller));
+        if (problem is null)
+        {
+            form.Group = "";
+        }
+    }
+
+    private sealed class LinkForm
+    {
+        public int Provider { get; set; }
+
+        public string Group { get; set; } = "";
+    }
+
+    private async Task Create()
+    {
+        await Do(service => service.CreateAsync(name.Trim(), description, Vaults.Caller));
+        if (problem is null)
+        {
+            name = "";
+            description = null;
+        }
+    }
+
+    private async Task Add(int groupKey)
+    {
+        if (adding[groupKey] != 0)
+        {
+            var userKey = adding[groupKey];
+            adding[groupKey] = 0;
+            await Do(service => service.AddMemberAsync(groupKey, userKey, Vaults.Caller));
+        }
+    }
+}

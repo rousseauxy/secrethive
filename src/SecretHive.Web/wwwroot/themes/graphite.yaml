@@ -1,0 +1,90 @@
+# ============================================================================
+# Graphite — the built-in look, written out as a theme pack.
+#
+# A pack states only what it changes: every token has a default in app.css, so
+# one this size is a complete theme. Drop a file in this folder, set
+# SecretHive:Theming:Theme to its name, and reload.
+#
+# The token names are shared with the sibling application, so a brand pack
+# written for one loads unchanged in the other. Keys it does not recognise
+# (a branding block, for instance) are ignored rather than refused.
+# ============================================================================
+
+name: graphite
+label: Graphite and amber
+description: Warm paper in light, graphite in dark, amber accent.
+
+fonts:
+  ui: "'Inter', ui-sans-serif, 'Segoe UI', system-ui, sans-serif"
+  mono: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace"
+
+# The name and logo in the top bar. The logo is a file next to this pack, served by SecretHive itself; a
+# data:image/... URL works too. Not a link to another site: the logo would depend on it, and every
+# reader's browser would call it. hideTitle: true drops the name when the logo already carries it.
+branding:
+  titlePlain: SecretHive
+
+layout:
+  radius: 4px
+  radiusLarge: 8px
+  # The widest the content grows; 1440px is the default.
+  pageWidth: 1440px
+
+tokens:
+  light:
+    bg: "#f6f4ef"
+    surface: "#ffffff"
+    inset: "#efece4"
+    hover: "#e9e5da"
+    border: "#e4e0d5"
+    border-strong: "#cec9ba"
+
+    text: "#24221d"
+    text-2: "#6c6759"
+    text-3: "#948e7e"
+
+    chrome: "#241f18"
+    chrome-text: "#ded8cb"
+    chrome-muted: "#948d7e"
+
+    accent: "#9a6400"
+    accent-strong: "#7d5100"
+    accent-soft: "#f6ecd9"
+    accent-contrast: "#ffffff"
+
+    ok: "#2f7d4f"
+    ok-soft: "#e3f1e8"
+    warn: "#9a6200"
+    warn-soft: "#f7ecd6"
+    danger: "#b3261e"
+    danger-soft: "#f9e5e3"
+    info: "#3b6ea5"
+    info-soft: "#e5edf6"
+
+  dark:
+    bg: "#17181a"
+    surface: "#1f2123"
+    inset: "#26292c"
+    hover: "#2d3033"
+    border: "#33363a"
+    border-strong: "#45494e"
+
+    text: "#e7e5df"
+    text-2: "#9b968c"
+    text-3: "#78736a"
+
+    chrome: "#121315"
+
+    accent: "#e0a355"
+    accent-strong: "#efb970"
+    accent-soft: "#33260f"
+    accent-contrast: "#1b1408"
+
+    ok: "#8cc79b"
+    ok-soft: "#1c2f24"
+    warn: "#dba54b"
+    warn-soft: "#3a2f1a"
+    danger: "#e38a7f"
+    danger-soft: "#3a201d"
+    info: "#7ba7d4"
+    info-soft: "#1e2a38"

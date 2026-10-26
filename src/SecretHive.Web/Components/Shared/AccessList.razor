@@ -1,0 +1,123 @@
+@* Who holds which role, and the form to give one: a vault's and a folder's. A role inherited from a folder above
+   says so and is changed on that folder, so it has no remove button here. *@
+@if (Entries.Count == 0)
+{
+    <div class="sh-empty">@Empty</div>
+}
+else
+{
+    <table class="sh-table">
+        <thead><tr><th>Who</th><th>Role</th><th>Given</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var entry in Entries)
+            {
+                <tr class="@(entry.From is null ? "" : "sh-inherited")">
+                    <td><span class="sh-badge">@(entry.GroupKey is not null ? "group" : "user")</span> <span class="sh-mono"><b>@entry.Name</b></span></td>
+                    <td>
+                        @SecretService.RoleName(entry.Role)
+                        @if (entry.From is { } from)
+                        {
+                            <span class="sh-muted sh-small"> from folder
+                                @if (LinkFolders)
+                                {
+                                    <a class="sh-mono" href="@($"/admin/folders?folder={Uri.EscapeDataString(from)}")">@from</a>
+                                }
+                                else
+                                {
+                                    <span class="sh-mono">@from</span>
+                                }
+                            </span>
+                        }
+                    </td>
+                    <td class="sh-muted sh-small">@entry.GrantedUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) by @entry.GrantedBy</td>
+                    <td>
+                        @if (entry.From is null)
+                        {
+                            <button class="sh-btn sh-btn-icon sh-btn-danger" title="Take this role away" @onclick="() => OnRemove.InvokeAsync(entry)"><Icon Name="trash" /><span class="sh-sr">Remove</span></button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+<div class="sh-card-body">
+    <form class="sh-form" @onsubmit:preventDefault>
+        <div class="sh-row">
+            <div class="sh-grow">
+                <Picker Items="Grantable" @bind-Value="grantTo" Placeholder="Search an account or a group…" />
+            </div>
+            <select class="sh-select" style="width: 180px" @bind="grantRole" aria-label="Role">
+                @foreach (var option in VaultRoles.All)
+                {
+                    <option value="@option">@SecretService.RoleName(option)</option>
+                }
+            </select>
+            <button type="button" class="sh-btn sh-btn-primary" @onclick="Give">Give role</button>
+        </div>
+        <span class="sh-hint">
+            @if (Hint is not null)
+            {
+                @Hint
+            }
+            <b>Reader</b> sees what exists, never a value. <b>Secrets Writer</b> sets values and reads none: for a job
+            that rotates. <b>Secrets User</b> reads values. <b>Secrets Officer</b> reads, sets, changes, deletes and
+            restores. <b>Vault Admin</b> decides who has which role, links to other vaults and purges.
+        </span>
+    </form>
+</div>
+
+@code {
+    private string grantTo = "";
+    private VaultRole grantRole = VaultRole.Reader;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<AccessEntry> Entries { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SecretHive.Domain.Entities.User> Users { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SecretHive.Domain.Entities.Group> Groups { get; set; } = [];
+
+    [Parameter]
+    public string Empty { get; set; } = "Nobody has a role here yet.";
+
+    [Parameter]
+    public RenderFragment? Hint { get; set; }
+
+    /// <summary>Whether a folder an inherited role comes from links to the folders page: for administrators.</summary>
+    [Parameter]
+    public bool LinkFolders { get; set; }
+
+    /// <summary>Gives a role to an account (user key) or a group (group key); exactly one is set.</summary>
+    [Parameter]
+    public EventCallback<(int? UserKey, int? GroupKey, VaultRole Role)> OnGive { get; set; }
+
+    [Parameter]
+    public EventCallback<AccessEntry> OnRemove { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnProblem { get; set; }
+
+    // People and services before groups, each by name.
+    private IReadOnlyList<Picker.Item> Grantable =>
+    [
+        .. Users.OrderBy(user => user.UserName, StringComparer.OrdinalIgnoreCase).Select(user => new Picker.Item($"u{user.Key}", user.IsService ? "service" : "user", user.UserName)),
+        .. Groups.OrderBy(group => group.Name, StringComparer.OrdinalIgnoreCase).Select(group => new Picker.Item($"g{group.Key}", "group", group.Name)),
+    ];
+
+    private async Task Give()
+    {
+        if (grantTo.Length < 2)
+        {
+            await OnProblem.InvokeAsync("Choose an account or a group first.");
+            return;
+        }
+
+        var key = int.Parse(grantTo[1..], CultureInfo.InvariantCulture);
+        var isUser = grantTo[0] == 'u';
+        grantTo = "";
+        await OnGive.InvokeAsync((isUser ? key : null, isUser ? null : key, grantRole));
+    }
+}
