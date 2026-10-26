@@ -9,7 +9,7 @@
 # came out on 10.0.12 while the tag gives 10.0.13 a few hours later, and the runtime's own copy of a library is what
 # loads (10.0.12 carries System.Security.Cryptography.Pkcs open to CVE-2026-84008). Move this line on purpose, with
 # the packages.
-ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.13-noble-chiseled-extra
+ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
