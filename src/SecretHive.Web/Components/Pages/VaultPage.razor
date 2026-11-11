@@ -92,7 +92,7 @@
                             @* The username has a column of its own. *@
                             @foreach (var field in secret.Fields.Where(field => field.Key != "username"))
                             {
-                                <div><span class="sh-muted sh-mono">@field.Key</span> @field.Value</div>
+                                <div title="@field.Value"><span class="sh-muted sh-mono">@field.Key</span> @field.Value</div>
                             }
                             @foreach (var field in secret.SensitiveFields.Where(field => field != "username"))
                             {
