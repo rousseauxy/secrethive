@@ -1,0 +1,65 @@
+# Dependency updates for this repository (GitHub Dependabot). The sibling apps on the private forge use Renovate
+# with the same rules: the .NET runtime, its images, the SDK and the Microsoft packages released with it move
+# together in one pull request; long-term releases only, so no .NET majors (the move to .NET 12 in Nov 2027 is a
+# hand-made pull request that also moves <TargetFramework>); everything else as one weekly pull request per
+# ecosystem. Nothing merges itself.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Brussels
+    labels: [dependencies]
+    ignore:
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "System.Security.Cryptography.*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      dotnet-runtime:
+        patterns: ["Microsoft.AspNetCore.*", "Microsoft.Extensions.*", "Microsoft.EntityFrameworkCore*", "System.Security.Cryptography.*"]
+      non-major:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Brussels
+    labels: [dependencies]
+    ignore:
+      - dependency-name: "mcr.microsoft.com/dotnet/*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Brussels
+    labels: [dependencies]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Brussels
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]
