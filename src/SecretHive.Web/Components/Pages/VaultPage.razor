@@ -92,11 +92,20 @@
                             @* The username has a column of its own. *@
                             @foreach (var field in secret.Fields.Where(field => field.Key != "username"))
                             {
-                                <div><span class="sh-muted sh-mono">@field.Key</span> @field.Value</div>
+                                <div>
+                                    <span class="sh-field-text" title="@field.Value"><span class="sh-muted sh-mono">@field.Key</span> @field.Value</span>
+                                    <CopyButton Title="@($"Copy {field.Key}")" Text="@(() => Task.FromResult<string?>(field.Value))" />
+                                </div>
                             }
                             @foreach (var field in secret.SensitiveFields.Where(field => field != "username"))
                             {
-                                <div><span class="sh-muted sh-mono">@field</span> <span class="sh-faint">hidden</span></div>
+                                <div>
+                                    <span class="sh-field-text"><span class="sh-muted sh-mono">@field</span> <span class="sh-faint">hidden</span></span>
+                                    @if (CanRead)
+                                    {
+                                        <CopyButton Title="@($"Copy {field} (recorded)")" Text="@(() => ReadText(secret.Name, $"field:{field}"))" />
+                                    }
+                                </div>
                             }
                         </td>
                         <td class="sh-muted sh-nowrap sh-col-extra">@secret.VersionCreatedUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>

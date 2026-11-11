@@ -189,6 +189,12 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-table tr.sh-subrow td { padding-top: 0; }
 .sh-table tr:has(+ tr.sh-subrow) td { border-bottom: 0; }
 .sh-break { overflow-wrap: anywhere; min-width: 160px; }
+/* A long field (a public key) would otherwise stretch the vault table past the screen: one line each, cut short,
+   the whole value on hover and behind the line's copy button. */
+.sh-table td.sh-col-fields { width: 40%; max-width: 0; }
+.sh-col-fields > div { display: flex; align-items: center; }
+.sh-field-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-col-fields > div > .sh-btn-icon { flex: none; }
 
 .sh-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--inset); color: var(--text-2); border: 1px solid var(--border); }
 .sh-badge-accent { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
