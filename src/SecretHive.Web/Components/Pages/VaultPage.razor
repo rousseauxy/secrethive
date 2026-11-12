@@ -89,21 +89,31 @@
                         </td>
                         <td class="sh-mono sh-col-extra">@secret.Version</td>
                         <td class="sh-small sh-col-fields">
-                            @* The username has a column of its own. *@
-                            @foreach (var field in secret.Fields.Where(field => field.Key != "username"))
-                            {
-                                <div>
-                                    <span class="sh-field-text" title="@field.Value"><span class="sh-muted sh-mono">@field.Key</span> @field.Value</span>
-                                    <CopyButton Title="@($"Copy {field.Key}")" Text="@(() => Task.FromResult<string?>(field.Value))" />
-                                </div>
+                            @* The username has a column of its own. The lines are one block, so a narrow screen puts them under
+                               each other beside the column's name; with no fields there is no block and the cell stays empty. *@
+                            @{
+                                var plain = secret.Fields.Where(field => field.Key != "username").ToList();
+                                var hidden = secret.SensitiveFields.Where(field => field != "username").ToList();
                             }
-                            @foreach (var field in secret.SensitiveFields.Where(field => field != "username"))
+                            @if (plain.Count + hidden.Count > 0)
                             {
-                                <div>
-                                    <span class="sh-field-text"><span class="sh-muted sh-mono">@field</span> <span class="sh-faint">hidden</span></span>
-                                    @if (CanRead)
+                                <div class="sh-field-lines">
+                                    @foreach (var field in plain)
                                     {
-                                        <CopyButton Title="@($"Copy {field} (recorded)")" Text="@(() => ReadText(secret.Name, $"field:{field}"))" />
+                                        <div>
+                                            <span class="sh-field-text" title="@field.Value"><span class="sh-muted sh-mono">@field.Key</span> @field.Value</span>
+                                            <CopyButton Title="@($"Copy {field.Key}")" Text="@(() => Task.FromResult<string?>(field.Value))" />
+                                        </div>
+                                    }
+                                    @foreach (var field in hidden)
+                                    {
+                                        <div>
+                                            <span class="sh-field-text"><span class="sh-muted sh-mono">@field</span> <span class="sh-faint">hidden</span></span>
+                                            @if (CanRead)
+                                            {
+                                                <CopyButton Title="@($"Copy {field} (recorded)")" Text="@(() => ReadText(secret.Name, $"field:{field}"))" />
+                                            }
+                                        </div>
                                     }
                                 </div>
                             }
