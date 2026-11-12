@@ -192,9 +192,9 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 /* A long field (a public key) would otherwise stretch the vault table past the screen: one line each, cut short,
    the whole value on hover and behind the line's copy button. */
 .sh-table td.sh-col-fields { width: 40%; max-width: 0; }
-.sh-col-fields > div { display: flex; align-items: center; }
+.sh-field-lines > div { display: flex; align-items: center; }
 .sh-field-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sh-col-fields > div > .sh-btn-icon { flex: none; }
+.sh-field-lines > div > .sh-btn-icon { flex: none; }
 
 .sh-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--inset); color: var(--text-2); border: 1px solid var(--border); }
 .sh-badge-accent { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
@@ -516,6 +516,8 @@ body:has(.sh-workspace) .sh-topbar-inner { max-width: none; }
   .sh-table tr.sh-subrow { padding-top: 0; }
   .sh-table tr:has(+ tr.sh-subrow) { border-bottom: 0; padding-bottom: 2px; }
   .sh-table .sh-nowrap { white-space: normal; }
+  .sh-table td.sh-col-fields { width: auto; max-width: none; }
+  .sh-field-lines { flex: 1 1 auto; min-width: 0; }
   .sh-break { min-width: 0; }
   .sh-card-header { flex-wrap: wrap; }
   .sh-card-body { padding: 12px; }
