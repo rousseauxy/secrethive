@@ -15,7 +15,9 @@ public sealed class FieldRow
 
     public string Value { get; set; } = "";
 
-    public FieldInput ToInput() => new(Name.Trim(), Encoding.UTF8.GetBytes(Value), Type, Sensitive);
+    /// <summary>What the row says, with a text value that was given more than one line sent as multiline.</summary>
+    public FieldInput ToInput() =>
+        new(Name.Trim(), Encoding.UTF8.GetBytes(Value), Type == FieldType.Text && !IsReserved(Name) && Value.AsSpan().IndexOfAny('\r', '\n') >= 0 ? FieldType.Multiline : Type, Sensitive);
 
     /// <summary>The names that mean something to SecretHive itself: their kind is fixed.</summary>
     public static bool IsReserved(string name) => name is "username" or "url" or "owner";
