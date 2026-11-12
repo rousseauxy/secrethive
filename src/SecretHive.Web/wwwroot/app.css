@@ -253,7 +253,7 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 
 /* Drawn by app.js from each element's title, as in FiGet. Dark in both themes, like the top bar, so it reads as
    chrome laid over the page rather than as part of it. */
-.sh-tooltip { position: absolute; z-index: 1100; max-width: 18rem; padding: 5px 9px; background: var(--chrome); color: var(--chrome-text); border: 1px solid var(--chrome-hover); border-radius: var(--r-1); box-shadow: var(--shadow-2); font-family: var(--font-ui); font-size: 12px; line-height: 1.35; text-align: center; pointer-events: none; opacity: 0; transform: translateY(2px); transition: opacity 0.12s ease, transform 0.12s ease; }
+.sh-tooltip { position: absolute; z-index: 1100; max-width: 18rem; white-space: pre-line; padding: 5px 9px; background: var(--chrome); color: var(--chrome-text); border: 1px solid var(--chrome-hover); border-radius: var(--r-1); box-shadow: var(--shadow-2); font-family: var(--font-ui); font-size: 12px; line-height: 1.35; text-align: center; pointer-events: none; opacity: 0; transform: translateY(2px); transition: opacity 0.12s ease, transform 0.12s ease; }
 .sh-tooltip.sh-tooltip-on { opacity: 1; transform: none; }
 .sh-tooltip::after { content: ""; position: absolute; left: var(--sh-tooltip-arrow, 50%); top: 100%; width: 8px; height: 8px; background: var(--chrome); transform: translate(-50%, -50%) rotate(45deg); }
 .sh-tooltip-below::after { top: 0; transform: translate(-50%, -50%) rotate(225deg); }
@@ -311,6 +311,8 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-hint { color: var(--text-2); font-size: 12px; }
 .sh-input, .sh-select, .sh-textarea { font: inherit; padding: 6px 9px; border-radius: var(--r-1); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); width: 100%; }
 .sh-textarea { font-family: var(--font-mono); font-size: 13px; min-height: 84px; resize: vertical; }
+/* A box of one line that grows with what is typed into it, up to a point. */
+.sh-textarea.sh-grow-box { font-family: inherit; font-size: inherit; min-height: 0; max-height: 16em; field-sizing: content; }
 .sh-input:focus, .sh-select:focus, .sh-textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .sh-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .sh-field-row + .sh-field-row { margin-top: 6px; }

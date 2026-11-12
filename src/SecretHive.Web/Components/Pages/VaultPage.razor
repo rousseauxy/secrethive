@@ -201,7 +201,7 @@
         </div>
         <div class="sh-field">
             <label class="sh-label">Description</label>
-            <input class="sh-input" @bind="description" />
+            <textarea class="sh-textarea sh-grow-box" rows="1" spellcheck="false" @bind="description"></textarea>
         </div>
         <div class="sh-field">
             <label class="sh-label">Fields</label>
@@ -224,7 +224,7 @@
         <CertificateUpload @ref="upload" />
         <div class="sh-field">
             <label class="sh-label">Description</label>
-            <input class="sh-input" @bind="certificateDescription" />
+            <textarea class="sh-textarea sh-grow-box" rows="1" spellcheck="false" @bind="certificateDescription"></textarea>
         </div>
         <div class="sh-form-actions">
             <button class="sh-btn sh-btn-primary" type="submit">Store certificate</button>

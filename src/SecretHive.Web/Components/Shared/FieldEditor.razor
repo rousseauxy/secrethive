@@ -24,11 +24,12 @@
                     <option value="@type">@type.ToString().ToLowerInvariant()</option>
                 }
             </select>
-            @* A recovery key or a block of JSON has lines: a box that keeps them. A line break pasted into a one-line box
-               makes the field multiline first (app.js), where a browser would otherwise drop it. *@
-            @if (row.Type is FieldType.Multiline or FieldType.Json)
+            @* Notes, a recovery key, a block of JSON: a box that grows with its lines, where Enter starts a new one. A text
+               field that gets a line break is saved as multiline. A sensitive line stays a masked box; a line break
+               pasted into a one-line box makes the field multiline first (app.js), where a browser would drop it. *@
+            @if (row.Type is FieldType.Multiline or FieldType.Json || (row.Type == FieldType.Text && !row.Sensitive))
             {
-                <textarea class="sh-textarea sh-grow" rows="3" placeholder="value" autocomplete="off" spellcheck="false" @bind="row.Value"></textarea>
+                <textarea class="sh-textarea sh-grow sh-grow-box" rows="1" placeholder="value" autocomplete="off" spellcheck="false" @bind="row.Value"></textarea>
             }
             else
             {
