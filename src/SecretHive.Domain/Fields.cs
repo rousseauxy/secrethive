@@ -20,7 +20,7 @@ public sealed record Field
 {
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    private static readonly string[] CredentialWords = ["password", "passwd", "secret", "token", "key", "credential"];
+    private static readonly string[] CredentialWords = ["pass", "secret", "token", "key", "credential"];
 
     private Field(string name, FieldType type, bool sensitive)
     {

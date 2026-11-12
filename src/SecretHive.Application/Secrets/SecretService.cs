@@ -281,31 +281,25 @@ public sealed partial class SecretService(ISecretStore store, IKeyRing keyRing, 
             }
         }
 
-        var address = new VersionAddress(value.Id, versionId);
-        var sealedVersion = keyRing.Seal(address, items);
-        foreach (var bytes in kept)
+        StoredVersion version;
+        try
         {
-            bytes.Dispose();
+            version = await AddVersionAsync(
+                value,
+                versionId,
+                items,
+                slot => keptTypes.GetValueOrDefault(slot) ?? fields.FirstOrDefault(candidate => FieldSlot(candidate.Field.Name) == slot).Field?.Type,
+                caller,
+                cancellationToken);
+        }
+        finally
+        {
+            foreach (var bytes in kept)
+            {
+                bytes.Dispose();
+            }
         }
 
-        var version = new StoredVersion
-        {
-            Id = versionId,
-            ValueId = value.Id,
-            Number = await store.LastVersionNumberAsync(value.Id, cancellationToken) + 1,
-            CreatedUtc = Now(),
-            CreatedBy = caller.Principal,
-            DataKeyId = sealedVersion.Key.MasterKeyId,
-            DataKey = Blob.Pack(sealedVersion.Key),
-        };
-        foreach (var (slot, item) in sealedVersion.Items)
-        {
-            var type = keptTypes.GetValueOrDefault(slot) ?? fields.FirstOrDefault(candidate => FieldSlot(candidate.Field.Name) == slot).Field?.Type;
-            version.Items.Add(new VersionItem { Id = Guid.NewGuid(), VersionId = versionId, Slot = slot, FieldType = type, Content = Blob.Pack(item) });
-        }
-
-        store.Add(version);
-        value.CurrentVersionId = versionId;
         value.ContentType = contentType;
 
         // The description is this name's own; the ordinary fields belong to the value, like the sensitive ones, and
@@ -576,16 +570,13 @@ public sealed partial class SecretService(ISecretStore store, IKeyRing keyRing, 
 
     /// <summary>
     /// Changes what describes a secret without touching its value: the description and the ordinary fields. No new
-    /// version is made, because nothing secret changed.
+    /// version is made, because nothing secret changed, unless a field is marked sensitive here: it then belongs to
+    /// a version, so one is made that carries the current value and sensitive fields along with it. Nobody reads
+    /// them on the way, so there is no read row; the new version has its own.
     /// </summary>
     public async Task UpdateDetailsAsync(string vaultName, string name, string? description, IReadOnlyList<FieldInput> fields, Caller caller, CancellationToken cancellationToken = default)
     {
         var defined = fields.Select(input => (Input: input, Field: Field.Define(input.Name, input.Type, input.Sensitive))).ToList();
-        if (defined.Any(item => item.Field.Sensitive))
-        {
-            throw new DomainException("field.sensitive.needs_version", "A sensitive field belongs to a version: set it with a new version.");
-        }
-
         foreach (var (input, field) in defined)
         {
             field.Validate(input.Value.Span);
@@ -594,10 +585,88 @@ public sealed partial class SecretService(ISecretStore store, IKeyRing keyRing, 
         SecretLimits.ValidateFields([.. defined.Select(item => (item.Field, item.Input.Value.Length))]);
         var vault = await RequireVaultAsync(vaultName, caller, VaultRole.SecretsOfficer, cancellationToken);
         var entry = await RequireEntryAsync(vault, name, cancellationToken);
+        var hidden = defined.Where(item => item.Field.Sensitive).ToList();
+        Guid? versionId = null;
+        if (hidden.Count > 0)
+        {
+            versionId = await HideFieldsAsync(entry, hidden, caller, cancellationToken);
+        }
+
         entry.Description = NullIfEmpty(description);
-        await ReplaceFieldsAsync(entry, defined, cancellationToken);
+        await ReplaceFieldsAsync(entry, [.. defined.Where(item => !item.Field.Sensitive)], cancellationToken);
         store.Add(Audit("secret.details.changed", caller, vault, entry));
+        if (versionId is { } id)
+        {
+            store.Add(Audit("secret.version.set", caller, vault, entry, id, detail: "sensitive fields: " + string.Join(", ", hidden.Select(item => item.Field.Name))));
+        }
+
         await store.SaveAsync(cancellationToken);
+    }
+
+    /// <summary>A new version: everything the current one holds, plus these fields, which take the place of any of the same name.</summary>
+    private async Task<Guid> HideFieldsAsync(SecretEntry entry, IReadOnlyList<(FieldInput Input, Field Field)> fields, Caller caller, CancellationToken cancellationToken)
+    {
+        var value = (await store.GetValuesAsync([entry.ValueId], cancellationToken))[entry.ValueId];
+        RequireKind(value, ValueKind.Secret, entry.Name);
+        var current = await store.FindVersionAsync(value.CurrentVersionId, cancellationToken)
+            ?? throw new DomainException("secret.version.missing", $"'{entry.Name}' has no current version.");
+        var sealedCurrent = new SealedVersion(
+            Blob.UnpackKey(current.DataKeyId, current.DataKey),
+            current.Items.ToDictionary(item => item.Slot, item => Blob.UnpackItem(item.Content), StringComparer.Ordinal));
+
+        var items = new Dictionary<string, ReadOnlyMemory<byte>>(StringComparer.Ordinal);
+        var types = new Dictionary<string, FieldType?>(StringComparer.Ordinal);
+        foreach (var (input, field) in fields)
+        {
+            items[FieldSlot(field.Name)] = input.Value;
+            types[FieldSlot(field.Name)] = field.Type;
+        }
+
+        var kept = new List<SecretBytes>();
+        try
+        {
+            foreach (var item in current.Items.Where(item => !items.ContainsKey(item.Slot)))
+            {
+                var bytes = keyRing.Open(new VersionAddress(value.Id, current.Id), sealedCurrent, item.Slot);
+                kept.Add(bytes);
+                items[item.Slot] = bytes.Reveal().ToArray();
+                types[item.Slot] = item.FieldType;
+            }
+
+            var version = await AddVersionAsync(value, Guid.NewGuid(), items, slot => types.GetValueOrDefault(slot), caller, cancellationToken);
+            return version.Id;
+        }
+        finally
+        {
+            foreach (var bytes in kept)
+            {
+                bytes.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Seals these items as the value's next version and makes it the current one.</summary>
+    private async Task<StoredVersion> AddVersionAsync(StoredValue value, Guid versionId, IReadOnlyDictionary<string, ReadOnlyMemory<byte>> items, Func<string, FieldType?> typeOf, Caller caller, CancellationToken cancellationToken)
+    {
+        var sealedVersion = keyRing.Seal(new VersionAddress(value.Id, versionId), items);
+        var version = new StoredVersion
+        {
+            Id = versionId,
+            ValueId = value.Id,
+            Number = await store.LastVersionNumberAsync(value.Id, cancellationToken) + 1,
+            CreatedUtc = Now(),
+            CreatedBy = caller.Principal,
+            DataKeyId = sealedVersion.Key.MasterKeyId,
+            DataKey = Blob.Pack(sealedVersion.Key),
+        };
+        foreach (var (slot, item) in sealedVersion.Items)
+        {
+            version.Items.Add(new VersionItem { Id = Guid.NewGuid(), VersionId = versionId, Slot = slot, FieldType = typeOf(slot), Content = Blob.Pack(item) });
+        }
+
+        store.Add(version);
+        value.CurrentVersionId = versionId;
+        return version;
     }
 
     /// <summary>

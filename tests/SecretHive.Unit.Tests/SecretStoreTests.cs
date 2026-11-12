@@ -727,7 +727,6 @@ public abstract class SecretStoreTests : IAsyncLifetime
         var changed = Assert.Single(await With(service => service.ListAsync("shop-prod", Alice)));
         Assert.Equal((1, "second", "team-b", 2), (changed.Version, changed.Description, changed.Fields["owner"], changed.Fields.Count));
         Assert.Equal(["pin"], changed.SensitiveFields);
-        Assert.Equal("field.sensitive.needs_version", await CodeOf(service => service.UpdateDetailsAsync("shop-prod", "login", null, [new FieldInput("pin", Bytes("x"), Sensitive: true)], Alice)));
 
         // A rotation of the value alone: the details and the sensitive field come along, and nobody read the field.
         await With(service => service.SetAsync(new SetSecret("shop-prod", "login", Bytes("generated-two"), KeepDetails: true, KeepSensitiveFields: ["pin"]), Alice));
@@ -737,6 +736,31 @@ public abstract class SecretStoreTests : IAsyncLifetime
         Assert.Equal(["pin"], rotated.SensitiveFields);
         Assert.Equal(["secret.details.changed", "secret.version.set"], (await AuditAsync()).Skip(before).Select(row => row.Code));
         Assert.Equal("generated-two", await ReadText("shop-prod", "login"));
+        using var pin = await With(service => service.ReadAsync("shop-prod", "login", Alice, "field:pin"));
+        Assert.Equal("generated-pin", Text(pin));
+    }
+
+    [Fact]
+    public async Task A_field_marked_sensitive_with_the_details_moves_into_a_new_version_without_a_read()
+    {
+        await With(service => service.CreateVaultAsync("shop-prod", null, Alice));
+        await With(service => service.SetAsync(
+            new SetSecret("shop-prod", "login", Bytes("generated-one"), Fields: [new FieldInput("owner", Bytes("team-a")), new FieldInput("passphrase", Bytes("generated-phrase")), new FieldInput("pin", Bytes("generated-pin"), Sensitive: true)]),
+            Alice));
+        var before = (await AuditAsync()).Count;
+
+        await With(service => service.UpdateDetailsAsync("shop-prod", "login", "moved", [new FieldInput("owner", Bytes("team-a")), new FieldInput("passphrase", Bytes("generated-phrase"), Sensitive: true)], Alice));
+
+        var moved = Assert.Single(await With(service => service.ListAsync("shop-prod", Alice)));
+        Assert.Equal((2, "moved"), (moved.Version, moved.Description));
+        Assert.Equal(["owner"], moved.Fields.Keys);
+        Assert.Equal(["passphrase", "pin"], moved.SensitiveFields.Order());
+        var rows = (await AuditAsync()).Skip(before).ToList();
+        Assert.Equal(["secret.details.changed", "secret.version.set"], rows.Select(row => row.Code));
+        Assert.Equal("sensitive fields: passphrase", rows[1].Detail);
+        Assert.Equal("generated-one", await ReadText("shop-prod", "login"));
+        using var phrase = await With(service => service.ReadAsync("shop-prod", "login", Alice, "field:passphrase"));
+        Assert.Equal("generated-phrase", Text(phrase));
         using var pin = await With(service => service.ReadAsync("shop-prod", "login", Alice, "field:pin"));
         Assert.Equal("generated-pin", Text(pin));
     }
