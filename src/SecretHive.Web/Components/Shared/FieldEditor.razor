@@ -24,7 +24,16 @@
                     <option value="@type">@type.ToString().ToLowerInvariant()</option>
                 }
             </select>
-            <input class="sh-input sh-grow" placeholder="value" type="@(row.Sensitive ? "password" : "text")" @bind="row.Value" />
+            @* A recovery key or a block of JSON has lines: a box that keeps them. A line break pasted into a one-line box
+               makes the field multiline first (app.js), where a browser would otherwise drop it. *@
+            @if (row.Type is FieldType.Multiline or FieldType.Json)
+            {
+                <textarea class="sh-textarea sh-grow" rows="3" placeholder="value" autocomplete="off" spellcheck="false" @bind="row.Value"></textarea>
+            }
+            else
+            {
+                <input class="sh-input sh-grow" placeholder="value" type="@(row.Sensitive ? "password" : "text")" data-field-value @bind="row.Value" />
+            }
             @if (AllowSensitive)
             {
                 <label class="sh-check"><input type="checkbox" @bind="row.Sensitive" disabled="@(row.Name == "owner")" /> sensitive</label>
