@@ -61,6 +61,7 @@ public sealed class DomainRuleTests
     [InlineData("db-password", true)]
     [InlineData("ApiToken", true)]
     [InlineData("signing-key", true)]
+    [InlineData("passphrase", true)]
     [InlineData("tenant-id", false)]
     [InlineData("username", false)]
     public void A_form_can_tell_which_field_names_look_like_credentials(string name, bool expected) =>
