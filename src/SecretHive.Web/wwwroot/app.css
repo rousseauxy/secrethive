@@ -181,6 +181,7 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-facts { display: grid; grid-template-columns: 180px 1fr; gap: 8px 16px; margin: 0; }
 .sh-facts dt { color: var(--text-2); }
 .sh-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sh-pre { white-space: pre-wrap; }
 
 .sh-muted { color: var(--text-2); }
 .sh-faint { color: var(--text-3); }

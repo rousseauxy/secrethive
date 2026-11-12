@@ -291,6 +291,39 @@
     window.addEventListener("resize", hide);
   })();
 
+  // ── A field with lines ──────────────────────────────────────────────────────────────────────
+  // A one-line box drops the line breaks of what is pasted into it, so a recovery key would be stored as one line.
+  // Text with a line break turns the field multiline first: the server redraws the row with a box that keeps them,
+  // and the text goes into that box.
+  document.addEventListener("paste", function (event) {
+    var input = event.target;
+    if (!input.matches || !input.matches("input[data-field-value]")) {
+      return;
+    }
+
+    var text = event.clipboardData ? event.clipboardData.getData("text") : "";
+    var row = input.closest(".sh-field-row");
+    var type = row && row.querySelector("select");
+    if (!/[\r\n]/.test(text) || !type || type.disabled) {
+      return;
+    }
+
+    event.preventDefault();
+    type.value = "Multiline";
+    type.dispatchEvent(new Event("change", { bubbles: true }));
+    var tries = 0;
+    (function fill() {
+      var box = row.querySelector("textarea");
+      if (box) {
+        box.value = text;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+        box.focus();
+      } else if (++tries < 40) {
+        setTimeout(fill, 25);
+      }
+    })();
+  });
+
   // ── A secret beside its list ────────────────────────────────────────────────────────────────
   // While a secret's panel is open, the arrow keys show the one above or below it, and Escape closes it, unless the
   // keyboard is busy in a field, a dialog or a menu. Both follow the page's own links, so the server decides. It
