@@ -2,7 +2,7 @@
 # cross-compiles for the target, and the final stage only copies, so a multi-architecture build needs no emulation.
 ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
 
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 ARG TARGETARCH
 ARG VERSION=0.0.0-dev
 WORKDIR /src
