@@ -206,6 +206,13 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-alert { padding: 10px 14px; border-radius: var(--r-1); margin-bottom: 16px; background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); }
 .sh-search { margin-bottom: 16px; }
 .sh-search .sh-input { width: 100%; }
+.sh-search-scoped { display: flex; gap: 8px; }
+.sh-search-scoped .sh-input { flex: 1; min-width: 0; }
+.sh-search-scoped .sh-select { width: auto; flex: none; }
+.sh-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.sh-bulkbar > span { margin-right: auto; }
+.sh-col-check { width: 1%; }
+.sh-bulk-names { max-height: 180px; overflow-y: auto; }
 .sh-done { padding: 10px 14px; border-radius: var(--r-1); margin-bottom: 16px; background: var(--accent-soft); color: var(--accent-strong); overflow-wrap: anywhere; }
 .sh-rule { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .sh-or { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 12px; margin: 16px 0 12px; }

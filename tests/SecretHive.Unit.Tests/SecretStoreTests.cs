@@ -649,6 +649,32 @@ public abstract class SecretStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_vault_deleted_with_its_contents_purges_every_name_in_it_and_spares_a_link_elsewhere()
+    {
+        await TwoVaultsWithALinkedToken();
+        await With(service => service.SetAsync(new SetSecret("app-a", "own-token", Bytes("generated-own")), Alice));
+        await With(service => service.SetAsync(new SetSecret("app-a", "old-token", Bytes("generated-old")), Alice));
+        await With(service => service.DeleteAsync("app-a", "old-token", Alice));
+
+        // Purge protection holds here too, and the same people are refused as for an empty vault.
+        await With(service => service.SetPurgeProtectionAsync("app-a", true, Alice));
+        Assert.Equal("vault.purge_protected", await CodeOf(service => service.DeleteVaultAsync("app-a", Caller.System("setup"), withContents: true)));
+        await With(service => service.SetPurgeProtectionAsync("app-a", false, Caller.System("setup")));
+        Assert.Equal("access.denied", await CodeOf(service => service.DeleteVaultAsync("app-a", new Caller("an-admin", Via: "ui", Role: UserRole.Admin), withContents: true)));
+
+        await With(service => service.DeleteVaultAsync("app-a", Caller.System("setup"), withContents: true));
+
+        Assert.DoesNotContain(await With(service => service.ListVaultsAsync(Caller.System("setup"))), vault => vault.Name == "app-a");
+        var audit = await AuditAsync();
+        Assert.Equal(3, audit.Count(row => row.Code == "secret.purged" && row.Vault == "app-a"));
+        Assert.Contains(audit, row => row.Code == "vault.deleted" && row.Detail == "with 3 secret(s) purged");
+
+        // The linked value lives on under its other name.
+        Assert.Equal("generated-one", await ReadText("app-b", "shop-token"));
+        Assert.Empty((await With(service => service.ListAsync("app-b", Alice))).Single().LinkedWith ?? []);
+    }
+
+    [Fact]
     public async Task Purge_is_the_only_thing_that_destroys_and_the_value_goes_with_its_last_name()
     {
         await TwoVaultsWithALinkedToken();

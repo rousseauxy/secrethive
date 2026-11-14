@@ -1,0 +1,143 @@
+@inject Vaults Vaults
+
+@* What can be done to several secrets of one vault at once: a delete, and a link, copy or move into another vault
+   under the same names. Each secret is its own call, on record as when it is done to one; a refusal for one does
+   not stop the others, and the dialog then says which went and which did not. *@
+<Dialog Title="@TitleOf()" Open="@(action is not null)" OnClose="Close">
+    <Problem Message="@problem" />
+    <ul class="sh-list sh-mono sh-bulk-names">
+        @foreach (var secret in secrets)
+        {
+            <li>@Vault/@secret.Name@(secret.IsLinked ? " (linked)" : "")</li>
+        }
+    </ul>
+    @switch (action)
+    {
+        case BulkAction.Delete:
+            <p style="margin-top: 0">
+                Each goes to the bin of this vault. Nothing is destroyed, and each can be restored.
+                @if (secrets.Any(secret => secret.IsLinked))
+                {
+                    <span>A linked one loses only this name; its other names keep the value.</span>
+                }
+            </p>
+            <div class="sh-form-actions">
+                <button type="button" class="sh-btn sh-btn-danger" disabled="@busy" @onclick="Delete">Delete @secrets.Count</button>
+                <button type="button" class="sh-btn" @onclick="Close">Cancel</button>
+            </div>
+            break;
+
+        case BulkAction.Elsewhere:
+            @if (otherVaults.Count == 0)
+            {
+                <div class="sh-note" style="margin: 0">There is no other vault in which you are Secrets Officer or more, and nothing can be put anywhere else.</div>
+            }
+            else
+            {
+                <div class="sh-field">
+                    <label class="sh-label">Vault</label>
+                    <Picker Items="@([.. otherVaults.Select(vault => new Picker.Item(vault.Name, SecretService.RoleName(vault.Role), vault.Name))])" @bind-Value="targetVault" Placeholder="Search a vault…" />
+                    <span class="sh-hint">Each keeps its name there; one whose name is taken there is refused and stays here.</span>
+                </div>
+            }
+            <div class="sh-form-actions">
+                <button type="button" class="sh-btn" disabled="@(!Chosen || busy)" @onclick="Link">Link</button>
+                <button type="button" class="sh-btn" disabled="@(!Chosen || busy)" @onclick="Copy">Copy</button>
+                <button type="button" class="sh-btn" disabled="@(!Chosen || busy)" @onclick="Move">Move</button>
+                <button type="button" class="sh-btn" @onclick="Close">Cancel</button>
+            </div>
+            <span class="sh-hint">
+                <b>Link</b>: a second name for the same value, which follows every rotation.
+                <b>Copy</b>: an independent secret; reading each source is recorded.
+                <b>Move</b>: the names and their history go there; manifests that name this vault must be changed.
+            </span>
+            break;
+    }
+</Dialog>
+
+@code {
+    private BulkAction? action;
+    private IReadOnlyList<SecretSummary> secrets = [];
+    private IReadOnlyList<(string Name, VaultRole Role)> otherVaults = [];
+    private string targetVault = "";
+    private string? problem;
+    private bool busy;
+
+    private bool Chosen => otherVaults.Any(vault => vault.Name == targetVault);
+
+    [Parameter, EditorRequired]
+    public string Vault { get; set; } = "";
+
+    /// <summary>Said when something was done, to any of them; the dialog is closed by then.</summary>
+    [Parameter]
+    public EventCallback<string> OnDone { get; set; }
+
+    public async Task Open(BulkAction what, IReadOnlyList<SecretSummary> on)
+    {
+        (secrets, problem, targetVault, busy, otherVaults) = (on, null, "", false, []);
+        if (what == BulkAction.Elsewhere)
+        {
+            try
+            {
+                otherVaults = await Vaults.OfficerVaultsAsync(Vault);
+            }
+            catch (DomainException e)
+            {
+                problem = e.Message;
+            }
+        }
+
+        action = what;
+        StateHasChanged();
+    }
+
+    private string TitleOf() => action switch
+    {
+        BulkAction.Delete => $"Delete {secrets.Count} secrets",
+        BulkAction.Elsewhere => $"Link, copy or move {secrets.Count} secrets",
+        _ => "",
+    };
+
+    private void Close() => (action, problem) = (null, null);
+
+    private Task Delete() => Each("Deleted", "in the bin", (service, name) => service.DeleteAsync(Vault, name, Vaults.Caller));
+
+    private Task Link() => Each("Linked", $"into {targetVault}", (service, name) => service.LinkAsync(Vault, name, targetVault, null, Vaults.Caller));
+
+    private Task Copy() => Each("Copied", $"to {targetVault}", (service, name) => service.CopyAsync(Vault, name, targetVault, null, Vaults.Caller));
+
+    private Task Move() => Each("Moved", $"to {targetVault}", (service, name) => service.MoveAsync(Vault, name, targetVault, null, Vaults.Caller));
+
+    // One call per secret. All went: the dialog closes and says so. Some were refused: it stays open on those, with
+    // why, and the ones that went are already gone from the list behind it.
+    private async Task Each(string verb, string where, Func<SecretService, string, Task> act)
+    {
+        busy = true;
+        var refused = new List<(SecretSummary Secret, string Why)>();
+        foreach (var secret in secrets)
+        {
+            if (await Vaults.Try(service => act(service, secret.Name)) is { } why)
+            {
+                refused.Add((secret, why));
+            }
+        }
+
+        busy = false;
+        var went = secrets.Count - refused.Count;
+        var message = $"{verb} {went} of {secrets.Count} {where}.";
+        if (refused.Count == 0)
+        {
+            Close();
+        }
+        else
+        {
+            secrets = [.. refused.Select(item => item.Secret)];
+            problem = $"{message} Refused: {string.Join(" ", refused.Select(item => $"{item.Secret.Name}: {item.Why}"))}";
+        }
+
+        if (went > 0)
+        {
+            await OnDone.InvokeAsync(message);
+        }
+    }
+}

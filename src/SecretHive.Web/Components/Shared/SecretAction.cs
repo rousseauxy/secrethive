@@ -15,3 +15,10 @@ public enum SecretAction
 /// vault after a delete, nothing when it stayed where it was.
 /// </summary>
 public sealed record SecretActionResult(string Message, string? Location);
+
+/// <summary>What can be done to several secrets of one vault at once, from its list.</summary>
+public enum BulkAction
+{
+    Delete,
+    Elsewhere,
+}
