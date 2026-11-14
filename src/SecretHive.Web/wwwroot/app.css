@@ -134,6 +134,22 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-nav a.active { background: var(--chrome-hover); color: var(--chrome-strong); }
 .sh-topbar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
+/* The search in the top bar: one box in the chrome's colours, and under it, over the page, what it found. */
+.sh-topsearch { position: relative; flex: 1 1 auto; min-width: 0; max-width: 560px; margin: 0 16px; }
+.sh-topsearch-box { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 10px; border-radius: var(--r-1); background: var(--chrome-hover); color: var(--chrome-muted); border: 1px solid transparent; }
+.sh-topsearch-box:focus-within { border-color: var(--accent); color: var(--chrome-text); }
+.sh-topsearch-box input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--chrome-strong); font: inherit; }
+.sh-topsearch-box input::placeholder { color: var(--chrome-muted); }
+.sh-topsearch-box select { flex: none; height: 24px; border: 0; border-radius: var(--r-1); background: var(--chrome); color: var(--chrome-text); font: inherit; font-size: 12px; padding: 0 6px; cursor: pointer; }
+.sh-topsearch-backdrop { position: fixed; inset: 0; z-index: 29; }
+.sh-topsearch-panel { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; max-height: min(70vh, 520px); overflow-y: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-2); padding: 6px; }
+.sh-topsearch-panel .sh-empty { padding: 14px; }
+.sh-topsearch-hit { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 10px; border-radius: var(--r-1); color: var(--text); }
+.sh-topsearch-hit:hover, .sh-topsearch-hit:focus { background: var(--hover); text-decoration: none; }
+.sh-topsearch-name { color: var(--accent-strong); }
+.sh-topsearch-desc { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-topsearch-more { padding: 8px 10px; }
+
 .sh-theme-btn { font: inherit; font-size: 16px; line-height: 1; width: 32px; height: 32px; border-radius: var(--r-1); border: 0; background: transparent; color: var(--chrome-text); cursor: pointer; }
 .sh-theme-btn:hover { background: var(--chrome-hover); color: var(--chrome-strong); }
 
@@ -204,11 +220,6 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-badge-ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 
 .sh-alert { padding: 10px 14px; border-radius: var(--r-1); margin-bottom: 16px; background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); }
-.sh-search { margin-bottom: 16px; }
-.sh-search .sh-input { width: 100%; }
-.sh-search-scoped { display: flex; gap: 8px; }
-.sh-search-scoped .sh-input { flex: 1; min-width: 0; }
-.sh-search-scoped .sh-select { width: auto; flex: none; }
 .sh-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .sh-bulkbar > span { margin-right: auto; }
 .sh-col-check { width: 1%; }
@@ -488,6 +499,9 @@ body:has(.sh-workspace) .sh-topbar-inner { max-width: none; }
 
 /* ── Narrow screens ─────────────────────────────────────────────── */
 @media (max-width: 760px) {
+  /* A row of its own under the brand and the menu: there is no room beside them on a phone. */
+  .sh-topbar-inner { flex-wrap: wrap; }
+  .sh-topsearch { order: 10; flex-basis: 100%; max-width: none; margin: 0 0 8px; }
   .sh-topbar-inner { padding: 0 12px; }
   .sh-brand { margin-right: 6px; }
   .sh-main { padding: 16px 12px 48px; }
