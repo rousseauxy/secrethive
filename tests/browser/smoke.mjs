@@ -203,6 +203,12 @@ try {
     await until(`!document.querySelector('.sh-dialog')`, 'the form to close');
   }
   await go('/vaults/shop-old');
+  await go('/vaults/shop-old/settings');
+  await until(`!!document.querySelector('.sh-search-scoped input')`, 'the search above the vault');
+  await typeLive('.sh-search-scoped input', 'key');
+  await until(`location.pathname === '/vaults/shop-old' && !!document.querySelector('.sh-table')`, 'the list, from another page of the vault');
+  report('searching this vault from its settings goes to its list', true);
+  await typeLive('.sh-search-scoped input', '');
   await until(`!!document.querySelector('.sh-search-scoped input')`, 'the search in the vault');
   await typeLive('.sh-search-scoped input', 'key');
   await until(`!document.querySelector('.sh-table').innerText.includes('old-db')`, 'the list to narrow');
@@ -214,8 +220,11 @@ try {
   await js(`(() => { const el = document.querySelector('.sh-search-scoped select'); el.value = 'vault'; el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await typeLive('.sh-search-scoped input', '');
   await until(`document.querySelector('.sh-table')?.innerText.includes('old-db')`, 'the whole list');
+  report('the list has no boxes to choose with until asked', !(await js(`!!document.querySelector('.sh-col-check')`)));
+  await click('Select');
+  await until(`!!document.querySelector('input[aria-label="Choose old-db"]')`, 'the boxes to choose with');
   await js(`(() => { document.querySelector('input[aria-label="Choose old-db"]').click(); return true; })()`);
-  await until(`!!document.querySelector('.sh-bulkbar')`, 'the bar for what was chosen');
+  await until(`!document.querySelector('.sh-bulkbar .sh-btn-danger').disabled`, 'the bar for what was chosen');
   await click('Delete…', `document.querySelector('.sh-bulkbar')`);
   await until(`!!document.querySelector('.sh-dialog')`, 'the delete dialog');
   await click('Delete 1');

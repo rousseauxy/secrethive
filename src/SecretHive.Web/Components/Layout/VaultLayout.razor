@@ -3,6 +3,8 @@
     click away. Nested inside MainLayout. As in the admin area, the list is a column on a wide screen and a menu that
     opens from a bar on a narrow one; these pages use the whole width of the screen, because a vault's list of
     secrets and the panel of one of them sit side by side.
+    Above every page here is the search for a secret. Across every vault, its answers take the place of the page; on
+    a vault's page it can instead narrow that vault's list, which the page receives as VaultFilter.
 *@
 @inherits LayoutComponentBase
 @layout MainLayout
@@ -28,13 +30,36 @@
     </details>
 
     <div class="sh-admin-body">
-        @Body
+        @if (vaults.Count > 0)
+        {
+            <SecretSearch @key="Current" Vault="@Current" OnSearching="shown => searching = shown" OnFilter="Narrow" />
+        }
+        @if (!searching)
+        {
+            <CascadingValue Name="VaultFilter" Value="filterSecrets">
+                @Body
+            </CascadingValue>
+        }
     </div>
 </div>
 
 @code {
     private IReadOnlyList<VaultPlace> vaults = [];
     private string filter = "";
+
+    // What the search shows: answers from every vault instead of the page, or a narrower list of this vault's secrets.
+    private bool searching;
+    private string filterSecrets = "";
+
+    // Narrowing a vault's list only means something on that list: from its other pages it goes there.
+    private void Narrow(string text)
+    {
+        filterSecrets = text;
+        if (text.Length > 0 && Current is { } vault && new Uri(Navigation.Uri).AbsolutePath != $"/vaults/{vault}")
+        {
+            Navigation.NavigateTo($"/vaults/{vault}");
+        }
+    }
 
     private RenderFragment List => @<text>
         <a class="sh-admin-link sh-vaultnav-all @(IsHome ? "active" : "")" href="/" aria-current="@(IsHome ? "page" : null)">All vaults</a>
@@ -177,6 +202,11 @@
     {
         await InvokeAsync(async () =>
         {
+            if (Current is null)
+            {
+                (searching, filterSecrets) = (false, "");
+            }
+
             if (Current is { } current && !vaults.Any(vault => string.Equals(vault.Name, current, StringComparison.OrdinalIgnoreCase)))
             {
                 await Reload();

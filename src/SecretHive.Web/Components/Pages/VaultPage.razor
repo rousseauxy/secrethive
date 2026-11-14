@@ -22,27 +22,19 @@
 <SecretActions @ref="actions" Vault="@Vault" OnDone="Done" />
 <BulkActions @ref="bulk" Vault="@Vault" OnDone="BulkDone" />
 
-@if (secrets.Count > 0 || filter.Length > 0)
-{
-    <SecretSearch @key="Vault" Vault="@Vault" OnSearching="shown => searchingAll = shown" OnFilter="text => filter = text" />
-}
-
-@if (!searchingAll)
-{
-
 @* The list, and beside it the secret chosen in the address (?secret=name). On a phone the panel takes the place of
    the list until it is closed. *@
 <div class="sh-split @(Shown is not null ? "has-panel" : "")">
 <div class="sh-split-list">
 <div class="sh-card">
-    @if (CanChange && chosen.Count > 0)
+    @if (Selecting)
     {
         @* What was chosen in the list, and what can be done to all of it at once. *@
         <div class="sh-bulkbar" role="toolbar" aria-label="Chosen secrets">
             <span><b>@chosen.Count</b> chosen</span>
-            <button class="sh-btn sh-btn-sm" @onclick="() => OpenBulk(BulkAction.Elsewhere)">Link, copy or move…</button>
-            <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => OpenBulk(BulkAction.Delete)"><Icon Name="trash" /> Delete…</button>
-            <button class="sh-btn sh-btn-sm" @onclick="() => chosen.Clear()">Clear</button>
+            <button class="sh-btn sh-btn-sm" disabled="@(chosen.Count == 0)" @onclick="() => OpenBulk(BulkAction.Elsewhere)">Link, copy or move…</button>
+            <button class="sh-btn sh-btn-sm sh-btn-danger" disabled="@(chosen.Count == 0)" @onclick="() => OpenBulk(BulkAction.Delete)"><Icon Name="trash" /> Delete…</button>
+            <button class="sh-btn sh-btn-sm" @onclick="StopSelecting">Done</button>
         </div>
     }
     @if (secrets.Count == 0)
@@ -51,14 +43,14 @@
     }
     else if (Listed.Count == 0)
     {
-        <div class="sh-empty">Nothing in @Vault matches "@filter". A search looks at names, descriptions and ordinary fields, never at values.</div>
+        <div class="sh-empty">Nothing in @Vault matches "@Query". A search looks at names, descriptions and ordinary fields, never at values.</div>
     }
     else
     {
         <table class="sh-table">
             <thead>
                 <tr>
-                    @if (CanChange)
+                    @if (Selecting)
                     {
                         <th class="sh-col-check">
                             <input type="checkbox" title="Choose every secret shown" aria-label="Choose every secret shown"
@@ -70,7 +62,17 @@
                     {
                         <th>Username</th>
                     }
-                    <th>Kind</th><th class="sh-col-extra">Version</th><th class="sh-col-fields">Fields</th><th class="sh-col-extra">Changed</th><th><span class="sh-sr">Actions</span></th>
+                    <th>Kind</th><th class="sh-col-extra">Version</th><th class="sh-col-fields">Fields</th><th class="sh-col-extra">Changed</th><th class="sh-actions">
+                        @* Choosing several is asked for, so the list stays as plain as it was until then. *@
+                        @if (CanChange && !selecting)
+                        {
+                            <button class="sh-btn sh-btn-sm" title="Choose several secrets to delete, link, copy or move at once" @onclick="() => selecting = true">Select</button>
+                        }
+                        else
+                        {
+                            <span class="sh-sr">Actions</span>
+                        }
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -78,7 +80,7 @@
                 {
                     var selected = string.Equals(secret.Name, Shown?.Name, StringComparison.Ordinal);
                     <tr class="@(selected ? "sh-selected" : "")" aria-selected="@(selected ? "true" : null)">
-                        @if (CanChange)
+                        @if (Selecting)
                         {
                             <td class="sh-col-check">
                                 <input type="checkbox" aria-label="@($"Choose {secret.Name}")" checked="@chosen.Contains(secret.Name)" @onchange="e => Choose(secret.Name, (bool)e.Value!)" />
@@ -221,7 +223,6 @@
                  ShowActivity="@(CanChange || Vaults.IsAdmin)" OnAction="action => Open(action, shown)" />
 }
 </div>
-}
 
 <Dialog Title="New secret" Open="secretOpen" OnClose="CloseDialogs" Wide="true">
     <Problem Message="@dialogProblem" />
@@ -283,14 +284,21 @@
     private SecretActions actions = default!;
     private BulkActions bulk = default!;
 
-    // What the search box narrows the list to, and whether it shows answers from every vault instead of the list.
-    private string filter = "";
-    private bool searchingAll;
+    // What the search box above the vault narrows the list to; it lives in VaultLayout.
+    [CascadingParameter(Name = "VaultFilter")]
+    public string? Filter { get; set; }
+
+    private string Query => Filter ?? "";
+
+    // Whether the list shows a box to choose each secret, and the bar for what was chosen.
+    private bool selecting;
+
+    private bool Selecting => CanChange && selecting;
 
     // The secrets chosen for an action on all of them, by name.
     private readonly HashSet<string> chosen = new(StringComparer.OrdinalIgnoreCase);
 
-    private IReadOnlyList<SecretSummary> Listed => filter.Length == 0 ? secrets : [.. secrets.Where(secret => SecretSearch.Matches(secret, filter))];
+    private IReadOnlyList<SecretSummary> Listed => Query.Length == 0 ? secrets : [.. secrets.Where(secret => SecretSearch.Matches(secret, Query))];
 
     private bool CanChange => role >= VaultRole.SecretsOfficer;
     private bool CanRead => role >= VaultRole.SecretsUser;
@@ -333,7 +341,7 @@
     {
         if (!string.Equals(loadedFor, Vault, StringComparison.OrdinalIgnoreCase))
         {
-            (done, activityOpen, filter, searchingAll) = (null, false, "", false);
+            (done, activityOpen, selecting) = (null, false, false);
             chosen.Clear();
             await Load();
             loadedFor = Vault;
@@ -476,13 +484,19 @@
         }
     }
 
-    // Only what the search shows: choosing everything never reaches a secret hidden by the filter.
+    // Only what the search shows: choosing everything never reaches a secret hidden by the search.
     private void ChooseAll(bool on)
     {
         foreach (var secret in Listed)
         {
             Choose(secret.Name, on);
         }
+    }
+
+    private void StopSelecting()
+    {
+        selecting = false;
+        chosen.Clear();
     }
 
     private Task OpenBulk(BulkAction action)
