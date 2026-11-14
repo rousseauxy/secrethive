@@ -264,6 +264,7 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.C
 // three minutes; a few people use this server, so the memory is no concern.
 builder.Services.AddRazorComponents().AddInteractiveServerComponents(options => options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(30));
 builder.Services.AddScoped<Vaults>();
+builder.Services.AddScoped<SearchState>();
 builder.Services.AddSingleton<ContentSecurityPolicy>();
 
 // Theme packs: YAML files that restate colours and a name, no code. The ones that ship, and the operator's own.

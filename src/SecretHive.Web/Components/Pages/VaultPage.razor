@@ -2,10 +2,17 @@
 @layout VaultLayout
 @inject Vaults Vaults
 @inject NavigationManager Navigation
+@inject SearchState Search
+@implements IDisposable
 
 <PageTitle>@Vault · SecretHive</PageTitle>
 
 <VaultHeader Vault="@Vault" Role="role" CanManage="canManage" Active="secrets">
+    @if (CanChange && secrets.Count > 0 && !selecting)
+    {
+        @* Choosing several is asked for, so the list stays as plain as it was until then. *@
+        <button class="sh-btn" title="Choose several secrets to delete, link, copy or move at once" @onclick="() => selecting = true">Select</button>
+    }
     @if (canSet)
     {
         <button class="sh-btn sh-btn-primary" @onclick="OpenSecret"><Icon Name="plus" /> New secret</button>
@@ -32,6 +39,8 @@
         @* What was chosen in the list, and what can be done to all of it at once. *@
         <div class="sh-bulkbar" role="toolbar" aria-label="Chosen secrets">
             <span><b>@chosen.Count</b> chosen</span>
+            @* The box that chooses all of them is in the table's heading, which a phone does not show. *@
+            <button class="sh-btn sh-btn-sm" disabled="@(Listed.All(secret => chosen.Contains(secret.Name)))" @onclick="() => ChooseAll(true)">All shown</button>
             <button class="sh-btn sh-btn-sm" disabled="@(chosen.Count == 0)" @onclick="() => OpenBulk(BulkAction.Elsewhere)">Link, copy or move…</button>
             <button class="sh-btn sh-btn-sm sh-btn-danger" disabled="@(chosen.Count == 0)" @onclick="() => OpenBulk(BulkAction.Delete)"><Icon Name="trash" /> Delete…</button>
             <button class="sh-btn sh-btn-sm" @onclick="StopSelecting">Done</button>
@@ -62,17 +71,7 @@
                     {
                         <th>Username</th>
                     }
-                    <th>Kind</th><th class="sh-col-extra">Version</th><th class="sh-col-fields">Fields</th><th class="sh-col-extra">Changed</th><th class="sh-actions">
-                        @* Choosing several is asked for, so the list stays as plain as it was until then. *@
-                        @if (CanChange && !selecting)
-                        {
-                            <button class="sh-btn sh-btn-sm" title="Choose several secrets to delete, link, copy or move at once" @onclick="() => selecting = true">Select</button>
-                        }
-                        else
-                        {
-                            <span class="sh-sr">Actions</span>
-                        }
-                    </th>
+                    <th>Kind</th><th class="sh-col-extra">Version</th><th class="sh-col-fields">Fields</th><th class="sh-col-extra">Changed</th><th><span class="sh-sr">Actions</span></th>
                 </tr>
             </thead>
             <tbody>
@@ -284,11 +283,8 @@
     private SecretActions actions = default!;
     private BulkActions bulk = default!;
 
-    // What the search box above the vault narrows the list to; it lives in VaultLayout.
-    [CascadingParameter(Name = "VaultFilter")]
-    public string? Filter { get; set; }
-
-    private string Query => Filter ?? "";
+    // What the search in the top bar narrows the list to.
+    private string Query => Search.Filter;
 
     // Whether the list shows a box to choose each secret, and the bar for what was chosen.
     private bool selecting;
@@ -335,6 +331,12 @@
     private SecretSummary? Shown => Selected is null ? null : secrets.FirstOrDefault(secret => string.Equals(secret.Name, Selected, StringComparison.OrdinalIgnoreCase));
 
     private string SelectHref(string name) => $"/vaults/{Vault}?secret={Uri.EscapeDataString(name)}";
+
+    protected override void OnInitialized() => Search.Changed += Narrowed;
+
+    private void Narrowed() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Search.Changed -= Narrowed;
 
     // Choosing another secret changes only the address: the list is read again only for another vault.
     protected override async Task OnParametersSetAsync()
