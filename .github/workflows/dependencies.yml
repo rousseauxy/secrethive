@@ -23,7 +23,8 @@ permissions:
 
 env:
   PROJECT: SecretHive
-  OSV_SCANNER_VERSION: v2.7.0
+  # Trivy since 2026-11-14 (TaricHive TH-96): osv-scanner 2.7.0 did not see glibc in chiseled images.
+  TRIVY_VERSION: 0.76.2
 
 jobs:
   report:
@@ -61,13 +62,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install osv-scanner
+      - name: Install Trivy
         run: |
-          base=https://github.com/google/osv-scanner/releases/download/$OSV_SCANNER_VERSION
-          curl -fsSLO "$base/osv-scanner_linux_amd64"
-          curl -fsSLO "$base/osv-scanner_SHA256SUMS"
-          grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS | sha256sum -c -
-          install -m 755 osv-scanner_linux_amd64 osv-scanner
+          base=https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION
+          curl -fsSLO "$base/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSLO "$base/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz\$" "trivy_${TRIVY_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
       - name: Scan the published images and report
         env:
           EVENT: ${{ github.event_name }}
