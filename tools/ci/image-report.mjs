@@ -1,14 +1,16 @@
-// What osv.dev knows about the published images: their operating-system packages, as osv-scanner
-// reads them, and the .NET runtime they run on, which no scanner reads.
+// What is known about the published images: their operating-system packages, as Trivy reads them,
+// and the .NET runtime they run on, which no scanner reads, asked about on osv.dev.
 //
 //   node tools/ci/image-report.mjs --image <name>=<scan.json>[,<runtimes.txt>] [--image …] [--weekly]
 //
-// <scan.json> is `osv-scanner scan image --format json`. <runtimes.txt> holds one ".NET shared
+// <scan.json> is `trivy image --scanners vuln --pkg-types os --list-all-pkgs --format json` (osv-scanner
+// until 2026-11-14, TH-96: osv-scanner 2.7.0 did not see glibc in chiseled images, Trivy does), or
+// `osv-scanner scan source --format json` for lockfiles (Spottr); the format is told from the file. <runtimes.txt> holds one ".NET shared
 // framework and its version" per line ("Microsoft.AspNetCore.App 10.0.13"), as image-scan.sh reads
 // them out of the image; it is empty for an image with no shared runtime (a self-contained app,
 // or no .NET at all). PROJECT names the project in messages; it defaults to the repository's name.
 //
-// Why both. osv-scanner reads an image's dpkg database and finds nothing of .NET: the runtime under
+// Why both. The scanner reads an image's dpkg database and finds nothing of .NET: the runtime under
 // /usr/share/dotnet is not a package there, and a project's .deps.json leaves out every assembly the
 // runtime provides. Measured 2026-10-14 on TaricHive: the 2.19.8 dependency files did not name
 // System.Security.Cryptography.Pkcs at all, while the 10.0.12 runtime that served it had fourteen
@@ -46,10 +48,34 @@ function newer(a, b) {
   return false;
 }
 
-/** The operating-system findings of one osv-scanner JSON file: one per source package and advisory. */
-function osFindings(image, file) {
+// Trivy names a severity per source and a CVSS score where one is published. The score is what the
+// threshold below has always meant (osv-scanner gave the highest one); an advisory with no score gets
+// its rating's floor, and UNKNOWN stays 0, which counts as "no stated severity".
+const ratingFloor = { CRITICAL: 9, HIGH: 7, MEDIUM: 4, LOW: 0.1 };
+
+/** The operating-system findings of one Trivy JSON file: one per source package and advisory. */
+function trivyFindings(image, json) {
   const findings = new Map();
-  for (const result of JSON.parse(readFileSync(file, 'utf8')).results ?? []) {
+  for (const result of json.Results ?? []) {
+    const source = new Map((result.Packages ?? []).map((p) => [p.ID, p.SrcName]));
+    for (const v of result.Vulnerabilities ?? []) {
+      const name = source.get(v.PkgID) || v.PkgName;
+      const scores = Object.values(v.CVSS ?? {}).flatMap((c) => [c.V3Score, c.V40Score]).filter((n) => n > 0);
+      const severity = scores.length ? Math.max(...scores) : (ratingFloor[v.Severity] ?? 0);
+      const fixed = Boolean(v.FixedVersion) && v.Status !== 'will_not_fix';
+      const key = `${name} ${v.VulnerabilityID}`;
+      const seen = findings.get(key);
+      findings.set(key, { image, name, version: v.InstalledVersion, id: v.VulnerabilityID,
+        severity: Math.max(severity, seen?.severity ?? 0), fixed: fixed || (seen?.fixed ?? false) });
+    }
+  }
+  return [...findings.values()];
+}
+
+/** The findings of one osv-scanner JSON file (Spottr's source scan): one per package and advisory. */
+function osvFindings(image, json) {
+  const findings = new Map();
+  for (const result of json.results ?? []) {
     for (const p of result.packages ?? []) {
       const ecosystem = (p.package.ecosystem ?? '').split(':').slice(0, 2).join(':');   // "Ubuntu:24.04"
       const severity = new Map();
@@ -66,6 +92,12 @@ function osFindings(image, file) {
     }
   }
   return [...findings.values()];
+}
+
+/** One scan file, from Trivy (images) or osv-scanner (`scan source`, Spottr's lockfiles). */
+function osFindings(image, file) {
+  const json = JSON.parse(readFileSync(file, 'utf8'));
+  return json.Results !== undefined || json.SchemaVersion !== undefined ? trivyFindings(image, json) : osvFindings(image, json);
 }
 
 /** The shared frameworks an image carries, as image-scan.sh wrote them. */
@@ -173,7 +205,7 @@ if (weekly) {
     // The weekly report says so when it is clean, or a clean image would never be heard of at all.
     const scanned = values('--image').map((spec) => spec.split('=')[0]).join(', ');
     console.log('Known: nothing.');
-    await post('notice', `${project}: nothing known in the images`, `osv.dev knows no vulnerability in ${scanned}.`);
+    await post('notice', `${project}: nothing known in the images`, `Trivy and osv.dev know no vulnerability in ${scanned}.`);
   }
 }
 
