@@ -164,11 +164,13 @@ public sealed partial class SecretService(ISecretStore store, IKeyRing keyRing, 
     }
 
     /// <summary>
-    /// Removes a vault that holds nothing: no secret, and nothing in its bin. It never destroys a value on the way;
-    /// whatever is in the vault has to be deleted and purged first, each of which is its own decision on record.
-    /// The roles given in the vault and its network list go with it.
+    /// Removes a vault. By default only one that holds nothing: no secret, and nothing in its bin, so no value is
+    /// destroyed on the way. With <paramref name="withContents"/> everything in it, live or in its bin, is deleted
+    /// and purged first, each name on record as for a purge by hand; a value linked into another vault stays there.
+    /// That is refused while the vault has purge protection. The roles given in the vault and its network list go
+    /// with it.
     /// </summary>
-    public async Task DeleteVaultAsync(string name, Caller caller, CancellationToken cancellationToken = default)
+    public async Task DeleteVaultAsync(string name, Caller caller, bool withContents = false, CancellationToken cancellationToken = default)
     {
         if (!(caller.Unrestricted || (caller.Role == UserRole.SuperAdmin && caller.IsInstanceAdmin)))
         {
@@ -177,16 +179,33 @@ public sealed partial class SecretService(ISecretStore store, IKeyRing keyRing, 
 
         var vault = await store.FindVaultAsync(Key(name), cancellationToken)
             ?? throw new DomainException("vault.not_found", $"There is no vault '{name}'.");
-        var live = (await store.ListEntriesAsync(vault.Id, inBin: false, cancellationToken)).Count;
-        var binned = (await store.ListEntriesAsync(vault.Id, inBin: true, cancellationToken)).Count;
-        if (live > 0 || binned > 0)
+        var live = await store.ListEntriesAsync(vault.Id, inBin: false, cancellationToken);
+        var binned = await store.ListEntriesAsync(vault.Id, inBin: true, cancellationToken);
+        if ((live.Count > 0 || binned.Count > 0) && !withContents)
         {
             throw new DomainException(
                 "vault.not_empty",
-                string.Create(System.Globalization.CultureInfo.InvariantCulture, $"'{vault.Name}' is not empty: {live} in the vault, {binned} in its bin. Delete and purge them first."));
+                string.Create(System.Globalization.CultureInfo.InvariantCulture, $"'{vault.Name}' is not empty: {live.Count} in the vault, {binned.Count} in its bin. Delete and purge them first."));
         }
 
-        store.Add(Security(Audit("vault.deleted", caller, vault)));
+        if (withContents && vault.PurgeProtection && (live.Count > 0 || binned.Count > 0))
+        {
+            throw new DomainException("vault.purge_protected", $"'{vault.Name}' has purge protection: what is in it cannot be destroyed, so the vault cannot be deleted with it.");
+        }
+
+        foreach (var entry in live)
+        {
+            store.Add(Audit("secret.deleted", caller, vault, entry));
+            await PurgeAsync(vault, entry, caller, cancellationToken);
+        }
+
+        foreach (var entry in binned)
+        {
+            await PurgeAsync(vault, entry, caller, cancellationToken);
+        }
+
+        var purged = live.Count + binned.Count;
+        store.Add(Security(Audit("vault.deleted", caller, vault, detail: purged > 0 ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"with {purged} secret(s) purged") : null)));
         store.Remove(vault);
         await store.SaveAsync(cancellationToken);
     }

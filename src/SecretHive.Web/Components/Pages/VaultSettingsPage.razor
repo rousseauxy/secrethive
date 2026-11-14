@@ -1,0 +1,262 @@
+@page "/vaults/{Vault}/settings"
+@layout VaultLayout
+@inject Vaults Vaults
+@inject NavigationManager Navigation
+
+<PageTitle>Settings of @Vault · SecretHive</PageTitle>
+
+@* The vault itself rather than what is in it or who reads it: purge protection, its folder, its name, and deleting
+   it. Each control is shown only to whoever may use it; the server decides again. *@
+<VaultHeader Vault="@Vault" Role="role" CanManage="canManage" Active="settings" />
+
+<Problem Message="@problem" />
+@if (done is not null)
+{
+    <div class="sh-done" role="status">@done</div>
+}
+
+@if (role == VaultRole.VaultAdmin)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2>Purge protection</h2>
+            <span class="sh-muted sh-small">Whether what is in the bin can be destroyed by hand.</span>
+        </div>
+        <div class="sh-card-body">
+            <div class="sh-row">
+                <button class="sh-btn" @onclick="ToggleProtection">@(protectedVault ? "Switch purge protection off" : "Switch purge protection on")</button>
+                <span class="sh-hint">
+                    @(protectedVault
+                        ? "On: nothing in this vault can be purged by hand, and it cannot be deleted with what is in it. Only a super admin can switch it off."
+                        : "Off: a Vault Admin can purge what is in the bin, which destroys it for good.")
+                </span>
+            </div>
+        </div>
+    </div>
+}
+
+@if (Vaults.IsAdmin)
+{
+    <div class="sh-card">
+        <div class="sh-card-header">
+            <h2>Folder and name</h2>
+            <span class="sh-muted sh-small">Where it sits decides which roles it inherits; its name is what manifests use.</span>
+        </div>
+        <div class="sh-card-body">
+            @* Which folder it is in decides what it inherits: a move can give or take roles without anyone touching
+               one, so the server says on record who gains and who loses. *@
+            <div class="sh-row">
+                <label class="sh-label" for="vault-folder" style="margin: 0">Folder</label>
+                <select id="vault-folder" class="sh-select" style="width: 260px" @bind="folderChoice">
+                    <option value="">(top, no folder)</option>
+                    @foreach (var folder in folders)
+                    {
+                        <option value="@folder.Name">@FolderOptions.Label(folder)</option>
+                    }
+                </select>
+                <button class="sh-btn" disabled="@(folderChoice == (currentFolder ?? ""))" @onclick="MoveToFolder">Move</button>
+                <span class="sh-hint">Every role given on that folder, or on one above it, then counts here too.</span>
+            </div>
+            <div class="sh-row" style="margin-top: 12px">
+                <button class="sh-btn" @onclick="OpenRename">Rename vault…</button>
+                <span class="sh-hint">What is in it stays. Every manifest and <span class="sh-mono">vault/name</span> reference to it has to follow.</span>
+            </div>
+        </div>
+    </div>
+}
+
+@if (Vaults.IsSuperAdmin)
+{
+    <div class="sh-card sh-card-danger">
+        <div class="sh-card-header">
+            <h2>Delete this vault</h2>
+            <span class="sh-muted sh-small">Its roles and networks go with it.</span>
+        </div>
+        <div class="sh-card-body">
+            <div class="sh-row">
+                <button class="sh-btn sh-btn-danger" @onclick="OpenDelete">Delete vault…</button>
+                <span class="sh-hint">
+                    @if (contents is { } c)
+                    {
+                        @(c.Live + c.Binned == 0 ? "It holds nothing, live or in its bin." : $"It holds {c.Live} secret(s), and {c.Binned} in its bin.")
+                    }
+                    An empty vault goes without destroying anything; one that holds secrets only with them, which purges them for good.
+                </span>
+            </div>
+        </div>
+    </div>
+}
+
+<Dialog Title="Rename vault" Open="renaming" OnClose="() => renaming = false">
+    <Problem Message="@renameProblem" />
+    <form class="sh-form" @onsubmit="Rename">
+        <div class="sh-note" style="margin: 0">
+            <b>Everything that names this vault stops finding it.</b> Secrets, roles, keys, networks and links stay with
+            the vault. Host manifests (<span class="sh-mono">vault:</span> and <span class="sh-mono">@Vault/…</span>
+            references), job settings and scripts that use the name <span class="sh-mono">@Vault</span> must be changed
+            to the new one, and hosts that read from it then pull again.
+        </div>
+        <div class="sh-field">
+            <label class="sh-label" for="new-vault-name">New name</label>
+            <input id="new-vault-name" class="sh-input sh-mono" @bind="newName" placeholder="@Vault" />
+            <span class="sh-hint">Letters, digits and hyphens, as for a new vault.</span>
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-primary" type="submit">Rename</button>
+            <button class="sh-btn" type="button" @onclick="() => renaming = false">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+<Dialog Title="@($"Delete {Vault}")" Open="deleting" OnClose="() => deleting = false">
+    <Problem Message="@deleteProblem" />
+    <form class="sh-form" @onsubmit="DeleteVault">
+        <label class="sh-check">
+            <input type="checkbox" @bind="withContents" />
+            Also delete and purge everything in it@(contents is { } c ? $": {c.Live} secret(s) and {c.Binned} in its bin" : "")
+        </label>
+        @if (withContents)
+        {
+            <div class="sh-alert" role="alert">
+                <b>This destroys every value in this vault for good.</b> Nothing goes to a bin and nothing can be restored.
+                A value linked into another vault stays there under its other name. Each purge is on record.
+                Refused while the vault has purge protection.
+            </div>
+        }
+        else
+        {
+            <span class="sh-hint">Without it, only an empty vault is deleted, and no value is destroyed.</span>
+        }
+        <div class="sh-field">
+            <label class="sh-label" for="confirm-vault-name">Type <span class="sh-mono">@Vault</span> to confirm</label>
+            <input id="confirm-vault-name" class="sh-input sh-mono" @bind="confirmName" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="sh-form-actions">
+            <button class="sh-btn sh-btn-danger" type="submit" disabled="@(!string.Equals(confirmName.Trim(), Vault, StringComparison.OrdinalIgnoreCase))">
+                @(withContents ? "Delete the vault and everything in it" : "Delete the vault")
+            </button>
+            <button class="sh-btn" type="button" @onclick="() => deleting = false">Cancel</button>
+        </div>
+    </form>
+</Dialog>
+
+@code {
+    private IReadOnlyList<FolderSummary> folders = [];
+    private string? currentFolder;
+    private string folderChoice = "";
+    private VaultRole? role;
+    private bool canManage;
+    private bool protectedVault;
+    private (int Live, int Binned)? contents;
+    private bool renaming;
+    private string newName = "";
+    private string? renameProblem;
+    private bool deleting;
+    private bool withContents;
+    private string confirmName = "";
+    private string? deleteProblem;
+    private string? problem;
+    private string? done;
+
+    [Parameter]
+    public string Vault { get; set; } = "";
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            role = await Vaults.Run(service => service.RoleAsync(Vault, Vaults.Caller));
+            canManage = await Vaults.Run(service => service.CanManageAccessAsync(Vault, Vaults.Caller));
+            if (role != VaultRole.VaultAdmin && !Vaults.IsAdmin)
+            {
+                problem ??= "Only a Vault Admin or an administrator of the server changes the vault itself.";
+                return;
+            }
+
+            var summary = (await Vaults.Run(service => service.ListVaultsAsync(Vaults.Caller))).First(vault => string.Equals(vault.Name, Vault, StringComparison.OrdinalIgnoreCase));
+            protectedVault = summary.PurgeProtection;
+            currentFolder = summary.Folder;
+            folderChoice = currentFolder ?? "";
+            folders = Vaults.IsAdmin ? await Vaults.Run(service => service.ListFoldersAsync(Vaults.Caller)) : [];
+            contents = await Contents();
+        }
+        catch (DomainException e)
+        {
+            problem = e.Message;
+        }
+    }
+
+    // How much a delete would take with it. Unknown when the caller may not list this vault: the server still says
+    // what it holds when a plain delete is refused.
+    private async Task<(int, int)?> Contents()
+    {
+        try
+        {
+            var live = await Vaults.Run(service => service.ListAsync(Vault, Vaults.Caller, bin: false));
+            var binned = role >= VaultRole.SecretsOfficer ? await Vaults.Run(service => service.ListAsync(Vault, Vaults.Caller, bin: true)) : null;
+            return binned is null ? null : (live.Count, binned.Count);
+        }
+        catch (DomainException)
+        {
+            return null;
+        }
+    }
+
+    private async Task Reload(string? said)
+    {
+        (problem, done) = (null, null);
+        await Load();
+        problem = said ?? problem;
+    }
+
+    private async Task ToggleProtection() =>
+        await Reload(await Vaults.Try(service => service.SetPurgeProtectionAsync(Vault, !protectedVault, Vaults.Caller)));
+
+    private async Task MoveToFolder()
+    {
+        var to = folderChoice.Length == 0 ? null : folderChoice;
+        var said = await Vaults.Try(service => service.MoveVaultToFolderAsync(Vault, to, Vaults.Caller));
+        Vaults.ChangedVaults();
+        await Reload(said);
+        done = said is null ? (to is null ? "Moved to the top. Who reaches it now is on the Access page; the audit trail says who gained and who lost." : $"Moved into {to}. Who reaches it now is on the Access page; the audit trail says who gained and who lost.") : null;
+    }
+
+    private void OpenRename()
+    {
+        (newName, renameProblem, renaming) = ("", null, true);
+    }
+
+    private async Task Rename()
+    {
+        var to = newName.Trim();
+        renameProblem = await Vaults.Try(service => service.RenameVaultAsync(Vault, to, Vaults.Caller));
+        if (renameProblem is null)
+        {
+            renaming = false;
+            Navigation.NavigateTo($"/vaults/{to}/settings");
+        }
+    }
+
+    private void OpenDelete()
+    {
+        (withContents, confirmName, deleteProblem, deleting) = (false, "", null, true);
+    }
+
+    private async Task DeleteVault()
+    {
+        if (!string.Equals(confirmName.Trim(), Vault, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        deleteProblem = await Vaults.Try(service => service.DeleteVaultAsync(Vault, Vaults.Caller, withContents));
+        if (deleteProblem is null)
+        {
+            deleting = false;
+            Vaults.ChangedVaults();
+            Navigation.NavigateTo("/");
+        }
+    }
+}

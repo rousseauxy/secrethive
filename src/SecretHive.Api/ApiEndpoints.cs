@@ -131,7 +131,7 @@ public static class ApiEndpoints
         // Only a vault that holds nothing, live or in its bin: this never destroys a value.
         api.MapDelete("/vaults/{vault}", async (string vault, SecretService service, HttpContext http, CancellationToken ct) =>
         {
-            await service.DeleteVaultAsync(vault, CallerOf(http), ct);
+            await service.DeleteVaultAsync(vault, CallerOf(http), cancellationToken: ct);
             return Results.NoContent();
         });
 
