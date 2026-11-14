@@ -32,59 +32,10 @@
 
 @if (view.Vaults.Count > 0)
 {
-    <div class="sh-search">
-        <input class="sh-input" type="search" placeholder="Search secrets in every vault: a name, a description, a field…" autocomplete="off" spellcheck="false"
-               aria-label="Search secrets in every vault" @bind="query" @bind:event="oninput" @bind:after="Search" />
-    </div>
+    <SecretSearch OnSearching="shown => searched = shown" />
 }
 
-@if (searched)
-{
-    <div class="sh-card">
-        @if (found.Count == 0)
-        {
-            <div class="sh-empty">Nothing in your vaults matches "@query". A search looks at names, descriptions and ordinary fields, never at values.</div>
-        }
-        else
-        {
-            <table class="sh-table">
-                <thead><tr><th>Secret</th><th>Vault</th><th>Kind</th><th>Fields</th><th>Changed</th></tr></thead>
-                <tbody>
-                    @foreach (var secret in found)
-                    {
-                        <tr>
-                            <td>
-                                <a class="sh-mono" href="@SecretHref(secret.Vault, secret.Name)">@secret.Name</a>
-                                @if (!string.IsNullOrEmpty(secret.Description))
-                                {
-                                    <span class="sh-info" tabindex="0" role="note" title="@secret.Description"><Icon Name="info" /><span class="sh-sr">@secret.Description</span></span>
-                                }
-                                @if (secret.IsLinked)
-                                {
-                                    <span class="sh-badge sh-badge-accent" title="@string.Join(", ", secret.LinkedWith ?? [])">linked</span>
-                                }
-                            </td>
-                            <td><a class="sh-mono" href="@($"/vaults/{secret.Vault}")">@secret.Vault</a></td>
-                            <td><span class="sh-badge">@(secret.Kind == ValueKind.Certificate ? "certificate" : "secret")</span></td>
-                            <td class="sh-small">
-                                @foreach (var field in secret.Fields)
-                                {
-                                    <div><span class="sh-muted sh-mono">@field.Key</span> @field.Value</div>
-                                }
-                            </td>
-                            <td class="sh-muted sh-nowrap">@secret.VersionCreatedUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-            @if (found.Count == SearchLimit)
-            {
-                <div class="sh-card-body sh-muted sh-small">The first @SearchLimit are shown. Type more to narrow it down.</div>
-            }
-        }
-    </div>
-}
-else
+@if (!searched)
 {
     @if (attention.Count > 0)
     {
@@ -230,7 +181,6 @@ else
 </Dialog>
 
 @code {
-    private const int SearchLimit = 50;
     private const int KeyDays = 14;
 
     /// <summary>One line of "needs attention": what, where to deal with it, and how urgent (danger, warn).</summary>
@@ -238,11 +188,8 @@ else
 
     private HomeView view = new([], [], [], [], null);
     private List<Attention> attention = [];
-    private IReadOnlyList<SecretSummary> found = [];
     private IReadOnlyList<FolderSummary> folders = [];
-    private string query = "";
     private bool searched;
-    private int asked;
     private string? problem;
 
     private string name = "";
@@ -328,33 +275,6 @@ else
         catch (DomainException)
         {
             return [];
-        }
-    }
-
-    // Every keystroke asks again; only the answer to the last one is shown.
-    private async Task Search()
-    {
-        var mine = ++asked;
-        var text = query.Trim();
-        if (text.Length < SecretService.MinimumSearchLength)
-        {
-            (found, searched) = ([], false);
-            return;
-        }
-
-        IReadOnlyList<SecretSummary> result;
-        try
-        {
-            result = await Vaults.Run(service => service.SearchAsync(text, Vaults.Caller, SearchLimit));
-        }
-        catch (DomainException)
-        {
-            return;
-        }
-
-        if (mine == asked)
-        {
-            (found, searched) = (result, true);
         }
     }
 

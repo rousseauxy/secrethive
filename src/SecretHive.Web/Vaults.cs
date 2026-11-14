@@ -3,6 +3,7 @@ using SecretHive.Application.Accounts;
 using SecretHive.Application.Ports;
 using SecretHive.Application.Secrets;
 using SecretHive.Domain;
+using SecretHive.Domain.Entities;
 
 namespace SecretHive.Web;
 
@@ -88,6 +89,24 @@ public sealed class Vaults(IServiceScopeFactory scopes, NavigationManager? navig
         {
             return e.Message;
         }
+    }
+
+    /// <summary>
+    /// The vaults other than <paramref name="except"/> in which this caller is Secrets Officer or more: a link, a copy
+    /// and a move all take that role in the other vault, so nothing can be put anywhere else.
+    /// </summary>
+    public async Task<IReadOnlyList<(string Name, VaultRole Role)>> OfficerVaultsAsync(string except)
+    {
+        var others = new List<(string, VaultRole)>();
+        foreach (var other in (await Run(service => service.ListVaultsAsync(Caller))).Where(vault => !string.Equals(vault.Name, except, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (await Run(service => service.RoleAsync(other.Name, Caller)) is { } there && there >= VaultRole.SecretsOfficer)
+            {
+                others.Add((other.Name, there));
+            }
+        }
+
+        return others;
     }
 
     /// <summary>Writes an audit row for something a page did that is not about a secret.</summary>

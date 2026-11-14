@@ -20,21 +20,51 @@
 }
 
 <SecretActions @ref="actions" Vault="@Vault" OnDone="Done" />
+<BulkActions @ref="bulk" Vault="@Vault" OnDone="BulkDone" />
+
+@if (secrets.Count > 0 || filter.Length > 0)
+{
+    <SecretSearch @key="Vault" Vault="@Vault" OnSearching="shown => searchingAll = shown" OnFilter="text => filter = text" />
+}
+
+@if (!searchingAll)
+{
 
 @* The list, and beside it the secret chosen in the address (?secret=name). On a phone the panel takes the place of
    the list until it is closed. *@
 <div class="sh-split @(Shown is not null ? "has-panel" : "")">
 <div class="sh-split-list">
 <div class="sh-card">
+    @if (CanChange && chosen.Count > 0)
+    {
+        @* What was chosen in the list, and what can be done to all of it at once. *@
+        <div class="sh-bulkbar" role="toolbar" aria-label="Chosen secrets">
+            <span><b>@chosen.Count</b> chosen</span>
+            <button class="sh-btn sh-btn-sm" @onclick="() => OpenBulk(BulkAction.Elsewhere)">Link, copy or move…</button>
+            <button class="sh-btn sh-btn-sm sh-btn-danger" @onclick="() => OpenBulk(BulkAction.Delete)"><Icon Name="trash" /> Delete…</button>
+            <button class="sh-btn sh-btn-sm" @onclick="() => chosen.Clear()">Clear</button>
+        </div>
+    }
     @if (secrets.Count == 0)
     {
         <div class="sh-empty">@(problem is null ? "This vault is empty." : "Nothing to show.")</div>
+    }
+    else if (Listed.Count == 0)
+    {
+        <div class="sh-empty">Nothing in @Vault matches "@filter". A search looks at names, descriptions and ordinary fields, never at values.</div>
     }
     else
     {
         <table class="sh-table">
             <thead>
                 <tr>
+                    @if (CanChange)
+                    {
+                        <th class="sh-col-check">
+                            <input type="checkbox" title="Choose every secret shown" aria-label="Choose every secret shown"
+                                   checked="@(Listed.All(secret => chosen.Contains(secret.Name)))" @onchange="e => ChooseAll((bool)e.Value!)" />
+                        </th>
+                    }
                     <th>Name</th>
                     @if (hasUsername)
                     {
@@ -44,10 +74,16 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var secret in secrets)
+                @foreach (var secret in Listed)
                 {
                     var selected = string.Equals(secret.Name, Shown?.Name, StringComparison.Ordinal);
                     <tr class="@(selected ? "sh-selected" : "")" aria-selected="@(selected ? "true" : null)">
+                        @if (CanChange)
+                        {
+                            <td class="sh-col-check">
+                                <input type="checkbox" aria-label="@($"Choose {secret.Name}")" checked="@chosen.Contains(secret.Name)" @onchange="e => Choose(secret.Name, (bool)e.Value!)" />
+                            </td>
+                        }
                         <td>
                             <a class="sh-mono" href="@SelectHref(secret.Name)" data-select>@secret.Name</a>
                             @if (!string.IsNullOrEmpty(secret.Description))
@@ -128,8 +164,8 @@
                             }
                             @if (canSet)
                             {
-                                <button class="sh-btn sh-btn-icon sh-btn-sm" title="@(secret.Kind == ValueKind.Certificate ? "Renew" : "New version")" @onclick="() => Open(SecretAction.NewVersion, secret)">
-                                    <Icon Name="@(secret.Kind == ValueKind.Certificate ? "certificate" : "refresh")" /><span class="sh-sr">@(secret.Kind == ValueKind.Certificate ? "Renew" : "New version")</span>
+                                <button class="sh-btn sh-btn-icon sh-btn-sm" title="@(secret.Kind == ValueKind.Certificate ? "Renew" : "Change value")" @onclick="() => Open(SecretAction.NewVersion, secret)">
+                                    <Icon Name="@(secret.Kind == ValueKind.Certificate ? "certificate" : "pencil")" /><span class="sh-sr">@(secret.Kind == ValueKind.Certificate ? "Renew" : "Change value")</span>
                                 </button>
                             }
                             @if (CanChange)
@@ -185,6 +221,7 @@
                  ShowActivity="@(CanChange || Vaults.IsAdmin)" OnAction="action => Open(action, shown)" />
 }
 </div>
+}
 
 <Dialog Title="New secret" Open="secretOpen" OnClose="CloseDialogs" Wide="true">
     <Problem Message="@dialogProblem" />
@@ -244,6 +281,16 @@
     private string? problem;
     private string? done;
     private SecretActions actions = default!;
+    private BulkActions bulk = default!;
+
+    // What the search box narrows the list to, and whether it shows answers from every vault instead of the list.
+    private string filter = "";
+    private bool searchingAll;
+
+    // The secrets chosen for an action on all of them, by name.
+    private readonly HashSet<string> chosen = new(StringComparer.OrdinalIgnoreCase);
+
+    private IReadOnlyList<SecretSummary> Listed => filter.Length == 0 ? secrets : [.. secrets.Where(secret => SecretSearch.Matches(secret, filter))];
 
     private bool CanChange => role >= VaultRole.SecretsOfficer;
     private bool CanRead => role >= VaultRole.SecretsUser;
@@ -286,7 +333,8 @@
     {
         if (!string.Equals(loadedFor, Vault, StringComparison.OrdinalIgnoreCase))
         {
-            (done, activityOpen) = (null, false);
+            (done, activityOpen, filter, searchingAll) = (null, false, "", false);
+            chosen.Clear();
             await Load();
             loadedFor = Vault;
         }
@@ -305,6 +353,7 @@
             canManage = await Vaults.Run(service => service.CanManageAccessAsync(Vault, Vaults.Caller));
             canSet = await Vaults.Run(service => service.CanSetAsync(Vault, Vaults.Caller));
             secrets = await Vaults.Run(service => service.ListAsync(Vault, Vaults.Caller));
+            chosen.RemoveWhere(name => !secrets.Any(secret => string.Equals(secret.Name, name, StringComparison.OrdinalIgnoreCase)));
             hasUsername = secrets.Any(secret => secret.Fields.ContainsKey("username") || secret.SensitiveFields.Contains("username"));
         }
         catch (DomainException e)
@@ -412,6 +461,45 @@
         {
             var here = $"/vaults/{Vault}/secrets/";
             Navigation.NavigateTo(location.StartsWith(here, StringComparison.OrdinalIgnoreCase) ? SelectHref(location[here.Length..]) : $"/vaults/{Vault}");
+        }
+    }
+
+    private void Choose(string name, bool on)
+    {
+        if (on)
+        {
+            chosen.Add(name);
+        }
+        else
+        {
+            chosen.Remove(name);
+        }
+    }
+
+    // Only what the search shows: choosing everything never reaches a secret hidden by the filter.
+    private void ChooseAll(bool on)
+    {
+        foreach (var secret in Listed)
+        {
+            Choose(secret.Name, on);
+        }
+    }
+
+    private Task OpenBulk(BulkAction action)
+    {
+        done = null;
+        return bulk.Open(action, [.. secrets.Where(secret => chosen.Contains(secret.Name))]);
+    }
+
+    // Whatever went is gone from the list (a delete, a move) or still in it (a link, a copy); the panel of a secret
+    // that left is closed.
+    private async Task BulkDone(string message)
+    {
+        await Load();
+        done = message;
+        if (Selected is not null && Shown is null)
+        {
+            Navigation.NavigateTo($"/vaults/{Vault}");
         }
     }
 

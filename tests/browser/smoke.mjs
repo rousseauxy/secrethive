@@ -115,6 +115,8 @@ const go = async path => {
 };
 // Blazor binds on "change": set the value and say so.
 const type = (selector, text) => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+// A search box binds on every keystroke ("input").
+const typeLive = (selector, text) => js(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 // A button by what it says, including the words kept for screen readers on an icon button.
 const click = (label, scope = 'document') => js(`(() => { const el = [...${scope}.querySelectorAll('button, a')].find(b => b.textContent.trim() === ${JSON.stringify(label)}); if (!el) throw new Error('no button ' + ${JSON.stringify(label)}); el.click(); return true; })()`);
 const shot = async name => {
@@ -181,6 +183,59 @@ try {
   report('copy puts the value on the clipboard', (await js('navigator.clipboard.readText()').catch(e => 'refused: ' + e.message)) === value);
   quiet('revealing and copying');
 
+  // A second vault for what acts on a vault as a whole: the search in it, a choice of several, and deleting it with
+  // what it holds.
+  await go('/');
+  await until(`!!document.querySelector('.sh-btn-primary')`, 'the page to be interactive');
+  await click('New vault');
+  await until(`!!document.querySelector('.sh-dialog input.sh-mono')`, 'the new vault form');
+  await type('.sh-dialog input.sh-mono', 'shop-old');
+  await click('Create vault');
+  await until(`!document.querySelector('.sh-dialog')`, 'the form to close');
+  for (const name of ['old-key', 'old-db']) {
+    await go('/vaults/shop-old');
+    await until(`!!document.querySelector('.sh-btn-primary')`, 'the vault page');
+    await click('New secret');
+    await until(`!!document.querySelector('.sh-dialog textarea')`, 'the new secret form');
+    await type('.sh-dialog input.sh-mono', name);
+    await type('.sh-dialog textarea', value);
+    await click('Create secret');
+    await until(`!document.querySelector('.sh-dialog')`, 'the form to close');
+  }
+  await go('/vaults/shop-old');
+  await until(`!!document.querySelector('.sh-search-scoped input')`, 'the search in the vault');
+  await typeLive('.sh-search-scoped input', 'key');
+  await until(`!document.querySelector('.sh-table').innerText.includes('old-db')`, 'the list to narrow');
+  report('the search in a vault narrows its list', (await js(`document.querySelector('.sh-table').innerText`)).includes('old-key'));
+  await js(`(() => { const el = document.querySelector('.sh-search-scoped select'); el.value = 'all'; el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await until(`document.body.innerText.includes('api-key')`, 'answers from every vault');
+  report('the same box searches every vault when asked', (await text()).includes('old-key'));
+  await shot('search-everywhere');
+  await js(`(() => { const el = document.querySelector('.sh-search-scoped select'); el.value = 'vault'; el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await typeLive('.sh-search-scoped input', '');
+  await until(`document.querySelector('.sh-table')?.innerText.includes('old-db')`, 'the whole list');
+  await js(`(() => { document.querySelector('input[aria-label="Choose old-db"]').click(); return true; })()`);
+  await until(`!!document.querySelector('.sh-bulkbar')`, 'the bar for what was chosen');
+  await click('Delete…', `document.querySelector('.sh-bulkbar')`);
+  await until(`!!document.querySelector('.sh-dialog')`, 'the delete dialog');
+  await click('Delete 1');
+  await until(`!document.querySelector('.sh-dialog') && !document.querySelector('.sh-table').innerText.includes('old-db')`, 'the chosen secret to go');
+  report('several chosen secrets are deleted at once', true);
+  quiet('searching and choosing');
+
+  await go('/vaults/shop-old/settings');
+  await until(`document.body.innerText.includes('Delete this vault')`, 'the settings of the vault');
+  await click('Delete vault…');
+  await until(`!!document.querySelector('#confirm-vault-name')`, 'the delete dialog');
+  await js(`(() => { document.querySelector('.sh-dialog input[type=checkbox]').click(); return true; })()`);
+  await until(`!!document.querySelector('.sh-dialog .sh-alert')`, 'the warning');
+  await typeLive('#confirm-vault-name', 'shop-old');
+  await until(`![...document.querySelectorAll('.sh-dialog button')].find(b => b.textContent.trim() === 'Delete the vault and everything in it').disabled`, 'the confirmation');
+  await click('Delete the vault and everything in it');
+  await until(`location.pathname === '/' && !document.querySelector('.sh-vaultnav a[href="/vaults/shop-old"]')`, 'the vault to go');
+  report('a vault is deleted with what it holds once its name is typed', true);
+  quiet('deleting a vault with what it holds');
+
   report('the page connection is a WebSocket', sockets.some(url => url.includes('/_blazor')), sockets.join(', ') || 'none opened');
 
   await go('/admin/audit');
@@ -192,7 +247,7 @@ try {
 
   // A phone: nothing wider than the screen, and still nothing to complain about.
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 800, deviceScaleFactor: 2, mobile: true });
-  for (const path of ['/', '/vaults/shop', '/vaults/shop?secret=api-key', '/vaults/shop/secrets/api-key', '/admin/audit', '/admin/system']) {
+  for (const path of ['/', '/vaults/shop', '/vaults/shop?secret=api-key', '/vaults/shop/secrets/api-key', '/vaults/shop/settings', '/admin/audit', '/admin/system']) {
     await go(path);
     await until(`!!document.querySelector('h1, .sh-panel h2')`, path);
     await sleep(300);
