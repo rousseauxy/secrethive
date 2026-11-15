@@ -140,7 +140,8 @@ code, .sh-mono { font-family: var(--font-mono); font-size: 13px; }
 .sh-topsearch-box:focus-within { border-color: var(--accent); color: var(--chrome-text); }
 .sh-topsearch-box input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--chrome-strong); font: inherit; }
 .sh-topsearch-box input::placeholder { color: var(--chrome-muted); }
-.sh-topsearch-box select { flex: none; height: 24px; border: 0; border-radius: var(--r-1); background: var(--chrome); color: var(--chrome-text); font: inherit; font-size: 12px; padding: 0 6px; cursor: pointer; }
+/* The same select as everywhere else (its list is the styled one), only smaller and in the chrome's colours. */
+.sh-topsearch-box .sh-select { flex: none; width: auto; height: 24px; border: 0; border-radius: var(--r-1); background: var(--chrome); color: var(--chrome-text); font-size: 12px; padding: 0 6px; }
 .sh-topsearch-backdrop { position: fixed; inset: 0; z-index: 29; }
 .sh-topsearch-panel { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; max-height: min(70vh, 520px); overflow-y: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-2); padding: 6px; }
 .sh-topsearch-panel .sh-empty { padding: 14px; }
