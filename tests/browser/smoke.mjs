@@ -30,7 +30,7 @@ const chrome = spawn(process.env.CHROME || 'google-chrome', [
 ], { stdio: 'ignore' });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let port;
-for (let i = 0; i < 100 && !port; i++) {
+for (let i = 0; i < 300 && !port; i++) {
   const file = join(profile, 'DevToolsActivePort');
   if (existsSync(file)) port = readFileSync(file, 'utf8').split('\n')[0].trim();
   else await sleep(100);
