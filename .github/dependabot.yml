@@ -37,6 +37,9 @@ updates:
       timezone: Europe/Brussels
     labels: [dependencies]
     ignore:
+      # Dependabot names these images without the registry ("dotnet/sdk"), so this first pattern is the one that matches.
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "mcr.microsoft.com/dotnet/*"
         update-types: ["version-update:semver-major"]
 
